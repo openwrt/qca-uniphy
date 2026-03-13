@@ -413,8 +413,8 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	struct clk_bulk_data *clks;
 	struct qca_uniphy *uniphy;
 	struct resource *res;
-	char name[32];
-	int ret, i, index, num_clks;
+	const char *name;
+	int ret, i, num_clks;
 
 	uniphy = devm_kzalloc(dev, sizeof(*uniphy), GFP_KERNEL);
 	if (!uniphy)
@@ -471,10 +471,12 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 
 	}
 
-	index = (res->start - UNIPHY0_BASE_ADDR) >> 16;
 	uniphy->pll_rate = 125000000;
 
-	snprintf(name, sizeof(name), "uniphy%d_gcc_rx_clk", index);
+	if (of_property_read_string_index(dev->of_node, "clock-output-names",
+					  0, &name))
+		return -ENODEV;
+
 	ret = qca_uniphy_clk_register(uniphy, &uniphy->rx_clk, name);
 	if (ret)
 		return dev_err_probe(dev, ret,
@@ -486,7 +488,10 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(uniphy->rx_clk_ref),
 				     "failed to get RX clock ref\n");
 
-	snprintf(name, sizeof(name), "uniphy%d_gcc_tx_clk", index);
+	if (of_property_read_string_index(dev->of_node, "clock-output-names",
+					  1, &name))
+			return -ENODEV;
+
 	ret = qca_uniphy_clk_register(uniphy, &uniphy->tx_clk, name);
 	if (ret)
 		return dev_err_probe(dev, ret,

@@ -41,8 +41,6 @@
 #define UNIPHY_CALIBRATION_TIMEOUT_US	100000
 #define UNIPHY_CALIBRATION_POLL_US	1000
 
-#define UNIPHY0_BASE_ADDR		0x07a00000
-
 struct qca_uniphy;
 
 struct qca_uniphy_clk {
