@@ -453,7 +453,8 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 				     "failed to get xpcs reset\n");
 
 	if (of_property_read_bool(dev->of_node, "qcom,psgmii")) {
-		uniphy->rst_psgmii = devm_reset_control_get_exclusive(dev, "psgmii");
+		uniphy->rst_psgmii = devm_reset_control_bulk_get_optional_exclusive(dev,
+					"psgmii");
 		if (IS_ERR(uniphy->rst_psgmii))
 			return dev_err_probe(dev, PTR_ERR(uniphy->rst_psgmii),
 					     "failed to get psgmii reset\n");
@@ -461,7 +462,7 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 		uniphy->rst_ports[0].id = "port1";
 		uniphy->rst_ports[1].id = "port2";
 		uniphy->rst_ports[2].id = "port3";
-		ret = devm_reset_control_bulk_get_exclusive(dev,
+		ret = devm_reset_control_bulk_get_optional_exclusive(dev,
 					ARRAY_SIZE(uniphy->rst_ports),
 					uniphy->rst_ports);
 		if (ret)
