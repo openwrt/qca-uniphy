@@ -59,8 +59,7 @@ struct qca_uniphy {
 	struct regmap *regmap;
 	struct reset_control *rst_soft;
 	struct reset_control *rst_xpcs;
-	struct reset_control *rst_psgmii;
-	struct reset_control_bulk_data rst_ports[3];
+	struct reset_control_bulk_data rst_ports[QCA_UNIPHY_CHANNELS];
 	struct clk_bulk_data *clks;
 	int num_clks;
 	bool psgmii_calibrated;

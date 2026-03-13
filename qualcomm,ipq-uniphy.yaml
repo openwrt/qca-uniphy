@@ -60,11 +60,11 @@ properties:
 
   resets:
     minItems: 2
-    maxItems: 6
+    maxItems: 7
 
   reset-names:
     minItems: 2
-    maxItems: 6
+    maxItems: 7
 
   qcom,psgmii:
     $ref: /schemas/types.yaml#/definitions/flag
@@ -122,20 +122,22 @@ then:
       items:
         - description: soft reset
         - description: sxpcs reset
-        - description: psgmii reset
         - description: port1 reset
         - description: port2 reset
         - description: port3 reset
+        - description: port4 reset
+        - description: port5 reset
 
     reset-names:
       minItems: 2
       items:
         - const: soft
         - const: xpcs
-        - const: psgmii
         - const: port1
         - const: port2
         - const: port3
+        - const: port4
+        - const: port5
 else:
   properties:
     clocks:
@@ -221,11 +223,14 @@ examples:
 
         resets = <&gcc GCC_UNIPHY0_SOFT_RESET>,
                  <&gcc GCC_UNIPHY0_XPCS_RESET>,
-                 <&gcc GCC_UNIPHY0_PORT_4_5_RESET>,
+                 <&gcc GCC_UNIPHY0_PORT1_ARES>,
                  <&gcc GCC_UNIPHY0_PORT2_ARES>,
-                 <&gcc GCC_UNIPHY0_PORT3_ARES>;
-        reset-names = "soft", "xpcs", "psgmii",
-                      "port1", "port2", "port3";
+                 <&gcc GCC_UNIPHY0_PORT3_ARES>,
+                 <&gcc GCC_UNIPHY0_PORT4_ARES>,
+                 <&gcc GCC_UNIPHY0_PORT5_ARES>;
+        reset-names = "soft", "xpcs",
+                      "port1", "port2", "port3",
+                      "port4", "port5";
 
         #pcs-cells = <1>;
     };
