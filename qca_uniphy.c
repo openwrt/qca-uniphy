@@ -18,6 +18,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 
 #include "qca_uniphy.h"
 
@@ -25,16 +26,6 @@ static struct qca_uniphy_pcs *
 pcs_to_uniphy_pcs(struct phylink_pcs *pcs)
 {
 	return container_of(pcs, struct qca_uniphy_pcs, pcs);
-}
-
-static u32 uniphy_read(struct qca_uniphy *uniphy, u32 reg)
-{
-	return readl(uniphy->base + reg);
-}
-
-static void uniphy_write(struct qca_uniphy *uniphy, u32 reg, u32 val)
-{
-	writel(val, uniphy->base + reg);
 }
 
 static unsigned long
@@ -110,18 +101,17 @@ static int qca_uniphy_psgmii_calibrate(struct qca_uniphy *uniphy)
 				  uniphy->rst_ports);
 	usleep_range(100, 200);
 
-	uniphy_write(uniphy, UNIPHY_MODE_CTRL,
+	regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL,
 		     UNIPHY_CH0_PSGMII_QSGMII | UNIPHY_SG_AUTONEG);
 
 	reset_control_assert(uniphy->rst_psgmii);
 	msleep(100);
 	reset_control_deassert(uniphy->rst_psgmii);
 
-	ret = read_poll_timeout(uniphy_read, val,
-				val & UNIPHY_CALIBRATION_DONE,
-				UNIPHY_CALIBRATION_POLL_US,
-				UNIPHY_CALIBRATION_TIMEOUT_US,
-				false, uniphy, UNIPHY_OFFSET_CALIB_4);
+	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
+				       val, val & UNIPHY_CALIBRATION_DONE,
+				       UNIPHY_CALIBRATION_POLL_US,
+				       UNIPHY_CALIBRATION_TIMEOUT_US);
 	if (ret)
 		dev_err(uniphy->dev, "PSGMII calibration timeout\n");
 
@@ -144,12 +134,12 @@ static void qca_uniphy_sgmii_setup(struct qca_uniphy *uniphy,
 {
 	int i;
 
-	uniphy_write(uniphy, UNIPHY_MISC2_PHY_MODE, phy_mode);
+	regmap_write(uniphy->regmap, UNIPHY_MISC2_PHY_MODE, phy_mode);
 
-	uniphy_write(uniphy, UNIPHY_PLL_POWER_ON_AND_RESET,
+	regmap_write(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
 		     UNIPHY_PLL_RESET_ASSERT);
 	msleep(500);
-	uniphy_write(uniphy, UNIPHY_PLL_POWER_ON_AND_RESET,
+	regmap_write(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
 		     UNIPHY_PLL_RESET_DEASSERT);
 	msleep(500);
 
@@ -161,7 +151,7 @@ static void qca_uniphy_sgmii_setup(struct qca_uniphy *uniphy,
 			clk_disable(uniphy->clks[i].clk);
 	}
 
-	uniphy_write(uniphy, UNIPHY_MODE_CTRL, mode_ctrl);
+	regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL, mode_ctrl);
 
 	reset_control_assert(uniphy->rst_soft);
 	usleep_range(500, 600);
@@ -195,7 +185,7 @@ static bool qca_uniphy_sgmii_calibration_done(struct qca_uniphy *uniphy)
 	if (uniphy->calibrated)
 		return true;
 
-	val = uniphy_read(uniphy, UNIPHY_OFFSET_CALIB_4);
+	regmap_read(uniphy->regmap, UNIPHY_OFFSET_CALIB_4, &val);
 	if (!(val & UNIPHY_CALIBRATION_DONE))
 		return false;
 
@@ -230,8 +220,9 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 		return;
 	}
 
-	val = uniphy_read(upcs->uniphy,
-			  UNIPHY_CH_INPUT_OUTPUT_6(upcs->channel));
+	regmap_read(upcs->uniphy->regmap,
+		    UNIPHY_CH_INPUT_OUTPUT_6(upcs->channel),
+		    &val);
 
 	state->link = !!(val & UNIPHY_CH_LINK);
 	if (!state->link)
@@ -315,11 +306,10 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 	int ret;
 
 	if (!uniphy->calibrated) {
-		ret = read_poll_timeout(uniphy_read, val,
-					val & UNIPHY_CALIBRATION_DONE,
-					UNIPHY_CALIBRATION_POLL_US,
-					UNIPHY_CALIBRATION_TIMEOUT_US,
-					false, uniphy, UNIPHY_OFFSET_CALIB_4);
+		ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
+					       val, val & UNIPHY_CALIBRATION_DONE,
+					       UNIPHY_CALIBRATION_POLL_US,
+					       UNIPHY_CALIBRATION_TIMEOUT_US);
 		if (ret) {
 			dev_err(uniphy->dev, "SGMII calibration timeout\n");
 			return;
@@ -328,11 +318,11 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 		qca_uniphy_sgmii_calibration_complete(uniphy);
 	}
 
-	val = uniphy_read(uniphy, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel));
-	uniphy_write(uniphy, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+	regmap_read(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel), &val);
+	regmap_write(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
 		     val & ~UNIPHY_CH_ADP_SW_RSTN);
 	usleep_range(1000, 2000);
-	uniphy_write(uniphy, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel), val);
+	regmap_write(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel), val);
 }
 
 static const struct phylink_pcs_ops qca_uniphy_pcs_ops = {
@@ -407,12 +397,18 @@ static void qca_uniphy_clk_disable_unprepare(void *data)
 	clk_bulk_disable_unprepare(uniphy->num_clks, uniphy->clks);
 }
 
+static const struct regmap_config uniphy_regmap_cfg = {
+	.reg_bits = 32,
+	.reg_stride = 4,
+	.val_bits = 32,
+};
+
 static int qca_uniphy_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct clk_bulk_data *clks;
 	struct qca_uniphy *uniphy;
-	struct resource *res;
+	void __iomem *base;
 	const char *name;
 	int ret, i, num_clks;
 
@@ -422,9 +418,14 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 
 	uniphy->dev = dev;
 
-	uniphy->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
-	if (IS_ERR(uniphy->base))
-		return PTR_ERR(uniphy->base);
+	base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(base))
+		return dev_err_probe(dev, PTR_ERR(base), "failed to ioremap resource");
+
+	uniphy->regmap = devm_regmap_init_mmio(dev, base, &uniphy_regmap_cfg);
+	if (IS_ERR(uniphy->regmap))
+		return dev_err_probe(dev, PTR_ERR(uniphy->regmap),
+				     "failed to init regmap");
 
 	num_clks = devm_clk_bulk_get_all(dev, &clks);
 	if (num_clks < 0)

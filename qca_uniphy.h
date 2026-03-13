@@ -56,7 +56,7 @@ struct qca_uniphy_pcs {
 
 struct qca_uniphy {
 	struct device *dev;
-	void __iomem *base;
+	struct regmap *regmap;
 	struct reset_control *rst_soft;
 	struct reset_control *rst_xpcs;
 	struct reset_control *rst_psgmii;
