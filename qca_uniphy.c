@@ -85,7 +85,8 @@ static int qca_uniphy_clk_register(struct qca_uniphy *uniphy,
 	return devm_clk_hw_register(uniphy->dev, &uclk->hw);
 }
 
-static int qca_uniphy_psgmii_calibrate(struct qca_uniphy *uniphy)
+static int qca_uniphy_psgmii_calibrate(struct qca_uniphy *uniphy,
+				       phy_interface_t interface)
 {
 	u32 val;
 	int ret, i;
@@ -96,13 +97,18 @@ static int qca_uniphy_psgmii_calibrate(struct qca_uniphy *uniphy)
 	for (i = 2; i < uniphy->num_clks; i++)
 		clk_disable(uniphy->clks[i].clk);
 
-	reset_control_assert(uniphy->rst_xpcs);
-	reset_control_bulk_assert(ARRAY_SIZE(uniphy->rst_ports),
-				  uniphy->rst_ports);
-	usleep_range(100, 200);
+	reset_control_assert(uniphy->rst_soft);
+	usleep_range(500, 600);
 
-	regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL,
-		     UNIPHY_CH0_PSGMII_QSGMII | UNIPHY_SG_AUTONEG);
+	if (interface == PHY_INTERFACE_MODE_PSGMII)
+		regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL,
+			     UNIPHY_CH0_PSGMII_QSGMII | UNIPHY_SG_AUTONEG);
+	else if (interface == PHY_INTERFACE_MODE_QSGMII)
+		regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL,
+			     UNIPHY_CH0_QSGMII_SGMII | UNIPHY_SG_AUTONEG);
+
+	reset_control_deassert(uniphy->rst_soft);
+	usleep_range(500, 600);
 
 	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
 				       val, val & UNIPHY_CALIBRATION_DONE,
@@ -110,9 +116,6 @@ static int qca_uniphy_psgmii_calibrate(struct qca_uniphy *uniphy)
 				       UNIPHY_CALIBRATION_TIMEOUT_US);
 	if (ret)
 		dev_err(uniphy->dev, "PSGMII calibration timeout\n");
-
-	reset_control_bulk_deassert(ARRAY_SIZE(uniphy->rst_ports),
-				   uniphy->rst_ports);
 
 	for (i = 2; i < uniphy->num_clks; i++)
 		clk_enable(uniphy->clks[i].clk);
@@ -260,10 +263,10 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	struct qca_uniphy *uniphy = upcs->uniphy;
 
 	switch (interface) {
-	case PHY_INTERFACE_MODE_PSGMII:
-		return qca_uniphy_psgmii_calibrate(uniphy);
-	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		return qca_uniphy_psgmii_calibrate(uniphy, interface);
+	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_2500BASEX:
 		if (interface == uniphy->current_mode)
 			return 0;
@@ -272,11 +275,6 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 			qca_uniphy_sgmii_setup(uniphy,
 				UNIPHY_MISC2_SGMII,
 				UNIPHY_SG_MODE | UNIPHY_SG_AUTONEG,
-				125000000);
-		else if (interface == PHY_INTERFACE_MODE_QSGMII)
-			qca_uniphy_sgmii_setup(uniphy,
-				UNIPHY_MISC2_SGMII,
-				UNIPHY_CH0_QSGMII_SGMII | UNIPHY_SG_AUTONEG,
 				125000000);
 		else if (interface == PHY_INTERFACE_MODE_2500BASEX)
 			qca_uniphy_sgmii_setup(uniphy,
