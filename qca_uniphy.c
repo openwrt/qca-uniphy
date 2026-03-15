@@ -201,9 +201,8 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 
 	/* Third update the mode ctrl... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
-			   UNIPHY_SGPLUS_MODE | UNIPHY_SG_MODE |
-			   UNIPHY_CH0_PSGMII_QSGMII | UNIPHY_CH0_QSGMII_SGMII |
-			   UNIPHY_AUTONEG_MODE_ATH, mode_ctrl);
+			   UNIPHY_MODE_SEL_MASK | UNIPHY_AUTONEG_MODE_ATH,
+			   mode_ctrl);
 
 	/*
 	 * ...and execute soft reset...
