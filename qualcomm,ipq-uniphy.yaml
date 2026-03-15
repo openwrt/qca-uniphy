@@ -8,6 +8,7 @@ title: Qualcomm IPQ UNIPHY PCS
 
 maintainers:
   - John Crispin <john@phrozen.org>
+  - Christian Marangi <ansuelsmth@gmail.com>
 
 description: |
   The UNIPHY blocks in Qualcomm IPQ6018 and IPQ8074 SoCs provide SerDes-based
@@ -38,10 +39,36 @@ properties:
       pairs are provided for each port the UNIPHY instance serves. Instances
       serving a single port have 4 clocks, PSGMII instances serving 5 ports
       have 12.
+    items:
+        - description: ahb clock
+        - description: sys clock
+        - description: port1_rx or port5_rx or port6_rx clock
+        - description: port1_tx or port5_tx or port6_tx clock
+        - description: port2_rx clock
+        - description: port2_tx clock
+        - description: port3_rx clock
+        - description: port3_tx clock
+        - description: port4_rx clock
+        - description: port4_tx clock
+        - description: port5_rx clock
+        - description: port5_tx clock
 
   clock-names:
     minItems: 4
     maxItems: 12
+    items:
+        - const: ahb
+        - const: sys
+        - enum: [port1_rx, port5_rx, port6_rx]
+        - enum: [port1_tx, port5_tx, port6_tx]
+        - const: port2_rx
+        - const: port2_tx
+        - const: port3_rx
+        - const: port3_tx
+        - const: port4_rx
+        - const: port4_tx
+        - const: port5_rx
+        - const: port5_tx
 
   clock-output-names:
     description: Name of the uniphy GCC clock for TX and RX.
@@ -59,19 +86,14 @@ properties:
     const: 1
 
   resets:
-    minItems: 2
-    maxItems: 7
+    items:
+      - description: soft reset
+      - description: xpcs reset
 
   reset-names:
-    minItems: 2
-    maxItems: 7
-
-  qcom,psgmii:
-    $ref: /schemas/types.yaml#/definitions/flag
-    description:
-      Indicates the UNIPHY instance operates in PSGMII mode (5-channel
-      mode as found on IPQ6018 uniphy0). When present, additional resets
-      (psgmii, port1, port2, port3) are required for calibration.
+    items:
+      - const: soft
+      - const: xpcs
 
 required:
   - compatible
@@ -81,88 +103,6 @@ required:
   - clock-names
   - resets
   - reset-names
-
-if:
-  required:
-    - qcom,psgmii
-then:
-  properties:
-    clocks:
-      items:
-        - description: ahb clock
-        - description: sys clock
-        - description: port1_rx clock
-        - description: port1_tx clock
-        - description: port2_rx clock
-        - description: port2_tx clock
-        - description: port3_rx clock
-        - description: port3_tx clock
-        - description: port4_rx clock
-        - description: port4_tx clock
-        - description: port5_rx clock
-        - description: port5_tx clock
-
-    clock-names:
-      items:
-        - const: ahb
-        - const: sys
-        - const: port1_rx
-        - const: port1_tx
-        - const: port2_rx
-        - const: port2_tx
-        - const: port3_rx
-        - const: port3_tx
-        - const: port4_rx
-        - const: port4_tx
-        - const: port5_rx
-        - const: port5_tx
-
-    resets:
-      minItems: 2
-      items:
-        - description: soft reset
-        - description: sxpcs reset
-        - description: port1 reset
-        - description: port2 reset
-        - description: port3 reset
-        - description: port4 reset
-        - description: port5 reset
-
-    reset-names:
-      minItems: 2
-      items:
-        - const: soft
-        - const: xpcs
-        - const: port1
-        - const: port2
-        - const: port3
-        - const: port4
-        - const: port5
-else:
-  properties:
-    clocks:
-      items:
-        - description: ahb clock
-        - description: sys clock
-        - description: port5_rx or port6_rx clock
-        - description: port5_tx or port6_tx clock
-
-    clock-names:
-      items:
-        - const: ahb
-        - const: sys
-        - enum: [port5_rx, port6_rx]
-        - enum: [port5_tx, port6_tx]
-
-    resets:
-      items:
-        - description: soft reset
-        - description: sxpcs reset
-
-    reset-names:
-      items:
-        - const: soft
-        - const: xpcs
 
 additionalProperties: false
 
@@ -222,15 +162,8 @@ examples:
                              "uniphy0_gcc_rx_clk";
 
         resets = <&gcc GCC_UNIPHY0_SOFT_RESET>,
-                 <&gcc GCC_UNIPHY0_XPCS_RESET>,
-                 <&gcc GCC_UNIPHY0_PORT1_ARES>,
-                 <&gcc GCC_UNIPHY0_PORT2_ARES>,
-                 <&gcc GCC_UNIPHY0_PORT3_ARES>,
-                 <&gcc GCC_UNIPHY0_PORT4_ARES>,
-                 <&gcc GCC_UNIPHY0_PORT5_ARES>;
-        reset-names = "soft", "xpcs",
-                      "port1", "port2", "port3",
-                      "port4", "port5";
+                 <&gcc GCC_UNIPHY0_XPCS_RESET>;
+        reset-names = "soft", "xpcs";
 
         #pcs-cells = <1>;
     };
