@@ -158,7 +158,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	switch (interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 		misc2_phy_mode = UNIPHY_MISC2_SGMII;
-		mode_ctrl = UNIPHY_SG_MODE;
+		mode_ctrl = UNIPHY_SGMII_MODE;
 		uniphy_rate = 125000000;
 		break;
 	case PHY_INTERFACE_MODE_QSGMII:
