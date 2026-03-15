@@ -312,11 +312,11 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 		qca_uniphy_sgmii_calibration_complete(uniphy);
 	}
 
-	regmap_read(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel), &val);
-	regmap_write(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
-		     val & ~UNIPHY_CH_ADP_SW_RSTN);
+	regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+			  UNIPHY_CH_ADP_SW_RSTN);
 	usleep_range(1000, 2000);
-	regmap_write(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel), val);
+	regmap_set_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+			UNIPHY_CH_ADP_SW_RSTN);
 }
 
 static const struct phylink_pcs_ops qca_uniphy_pcs_ops = {
