@@ -17,9 +17,11 @@
 #define   UNIPHY_MISC2_PHY_MODE_MASK	GENMASK(6, 4)
 #define     UNIPHY_MISC2_SGMII		FIELD_PREP_CONST(UNIPHY_MISC2_PHY_MODE_MASK, 0x3)
 #define     UNIPHY_MISC2_SGMIIPLUS	FIELD_PREP_CONST(UNIPHY_MISC2_PHY_MODE_MASK, 0x5)
+#define     UNIPHY_MISC2_USXGMII	FIELD_PREP_CONST(UNIPHY_MISC2_PHY_MODE_MASK, 0x7)
 
 #define UNIPHY_MODE_CTRL		0x46c
 #define   UNIPHY_MODE_SEL_MASK		GENMASK(12, 8)
+#define   UNIPHY_XPCS_MODE		BIT(12)
 #define   UNIPHY_SGPLUS_MODE		BIT(11)
 #define   UNIPHY_SGMII_MODE		BIT(10)
 #define   UNIPHY_CH0_PSGMII_QSGMII	BIT(9)
@@ -39,6 +41,46 @@
 #define   UNIPHY_CH_DUPLEX		BIT(6)
 #define   UNIPHY_CH_LINK		BIT(7)
 
+#define XPCS_INDIRECT_ADDR		0x8000
+#define XPCS_INDIRECT_AHB_ADDR		0x83fc
+#define XPCS_INDIRECT_ADDR_H		GENMASK(20, 8)
+#define XPCS_INDIRECT_ADDR_L		GENMASK(7, 0)
+#define XPCS_INDIRECT_DATA_ADDR(reg)	(FIELD_PREP(GENMASK(15, 10), 0x20) | \
+					 FIELD_PREP(GENMASK(9, 2), \
+					 FIELD_GET(XPCS_INDIRECT_ADDR_L, reg)))
+
+#define XPCS_DIG_CTRL			0x38000
+#define XPCS_SOFT_RESET			BIT(15)
+#define XPCS_USXG_ADPT_RESET		BIT(10)
+#define XPCS_USXG_EN			BIT(9)
+
+#define XPCS_MII_CTRL			0x1f0000
+#define XPCS_MII1_CTRL(x)		(0x1a0000 + 0x10000 * ((x) - 1))
+#define XPCS_MII_AN_EN			BIT(12)
+#define XPCS_DUPLEX_FULL		BIT(8)
+#define XPCS_SPEED_MASK			(BIT(13) | BIT(6) | BIT(5))
+#define XPCS_SPEED_10000		(BIT(13) | BIT(6))
+#define XPCS_SPEED_5000			(BIT(13) | BIT(5))
+#define XPCS_SPEED_2500			BIT(5)
+#define XPCS_SPEED_1000			BIT(6)
+#define XPCS_SPEED_100			BIT(13)
+#define XPCS_SPEED_10			0
+
+#define XPCS_MII_AN_CTRL		0x1f8001
+#define XPCS_MII1_AN_CTRL(x)		(0x1a8001 + 0x10000 * ((x) - 1))
+#define XPCS_MII_AN_8BIT		BIT(8)
+
+#define XPCS_MII_AN_INTR_STS		0x1f8002
+#define XPCS_MII1_AN_INTR_STS(x)	(0x1a8002 + 0x10000 * ((x) - 1))
+#define XPCS_USXG_AN_LINK_STS		BIT(14)
+#define XPCS_USXG_AN_SPEED_MASK		GENMASK(12, 10)
+#define XPCS_USXG_AN_SPEED_10		0
+#define XPCS_USXG_AN_SPEED_100		1
+#define XPCS_USXG_AN_SPEED_1000		2
+#define XPCS_USXG_AN_SPEED_2500		4
+#define XPCS_USXG_AN_SPEED_5000		5
+#define XPCS_USXG_AN_SPEED_10000	3
+
 #define UNIPHY_CALIBRATION_TIMEOUT_US	100000
 #define UNIPHY_CALIBRATION_POLL_US	1000
 
@@ -57,6 +99,7 @@ struct qca_uniphy_pcs {
 
 struct qca_uniphy {
 	struct device *dev;
+	void __iomem *base;
 	struct regmap *regmap;
 	struct reset_control *rst_soft;
 	struct reset_control *rst_xpcs;
