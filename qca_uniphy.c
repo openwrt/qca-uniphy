@@ -85,113 +85,6 @@ static int qca_uniphy_clk_register(struct qca_uniphy *uniphy,
 	return devm_clk_hw_register(uniphy->dev, &uclk->hw);
 }
 
-static int qca_uniphy_psgmii_calibrate(struct qca_uniphy *uniphy,
-				       phy_interface_t interface)
-{
-	u32 val;
-	int ret, i;
-
-	if (uniphy->psgmii_calibrated)
-		return 0;
-
-	for (i = 2; i < uniphy->num_clks; i++)
-		clk_disable(uniphy->clks[i].clk);
-
-	reset_control_assert(uniphy->rst_soft);
-	usleep_range(500, 600);
-
-	if (interface == PHY_INTERFACE_MODE_PSGMII)
-		regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL,
-			     UNIPHY_CH0_PSGMII_QSGMII | UNIPHY_SG_AUTONEG);
-	else if (interface == PHY_INTERFACE_MODE_QSGMII)
-		regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL,
-			     UNIPHY_CH0_QSGMII_SGMII | UNIPHY_SG_AUTONEG);
-
-	reset_control_deassert(uniphy->rst_soft);
-	usleep_range(500, 600);
-
-	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
-				       val, val & UNIPHY_CALIBRATION_DONE,
-				       UNIPHY_CALIBRATION_POLL_US,
-				       UNIPHY_CALIBRATION_TIMEOUT_US);
-	if (ret)
-		dev_err(uniphy->dev, "PSGMII calibration timeout\n");
-
-	for (i = 2; i < uniphy->num_clks; i++)
-		clk_enable(uniphy->clks[i].clk);
-
-	if (ret)
-		return ret;
-
-	uniphy->psgmii_calibrated = true;
-	return 0;
-}
-
-static void qca_uniphy_sgmii_setup(struct qca_uniphy *uniphy,
-				    u32 phy_mode, u32 mode_ctrl,
-				    unsigned long rate)
-{
-	int i;
-
-	regmap_write(uniphy->regmap, UNIPHY_MISC2_PHY_MODE, phy_mode);
-
-	regmap_write(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
-		     UNIPHY_PLL_RESET_ASSERT);
-	msleep(500);
-	regmap_write(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
-		     UNIPHY_PLL_RESET_DEASSERT);
-	msleep(500);
-
-	reset_control_assert(uniphy->rst_xpcs);
-	usleep_range(100, 200);
-
-	if (uniphy->calibrated) {
-		for (i = 2; i < uniphy->num_clks; i++)
-			clk_disable(uniphy->clks[i].clk);
-	}
-
-	regmap_write(uniphy->regmap, UNIPHY_MODE_CTRL, mode_ctrl);
-
-	reset_control_assert(uniphy->rst_soft);
-	usleep_range(500, 600);
-	reset_control_deassert(uniphy->rst_soft);
-
-	uniphy->sgmii_rate = rate;
-	uniphy->calibrated = false;
-}
-
-static void
-qca_uniphy_sgmii_calibration_complete(struct qca_uniphy *uniphy)
-{
-	int i;
-
-	for (i = 2; i < uniphy->num_clks; i++)
-		clk_enable(uniphy->clks[i].clk);
-
-	reset_control_deassert(uniphy->rst_xpcs);
-	usleep_range(100, 200);
-
-	clk_set_rate(uniphy->rx_clk_ref, uniphy->sgmii_rate);
-	clk_set_rate(uniphy->tx_clk_ref, uniphy->sgmii_rate);
-
-	uniphy->calibrated = true;
-}
-
-static bool qca_uniphy_sgmii_calibration_done(struct qca_uniphy *uniphy)
-{
-	u32 val;
-
-	if (uniphy->calibrated)
-		return true;
-
-	regmap_read(uniphy->regmap, UNIPHY_OFFSET_CALIB_4, &val);
-	if (!(val & UNIPHY_CALIBRATION_DONE))
-		return false;
-
-	qca_uniphy_sgmii_calibration_complete(uniphy);
-	return true;
-}
-
 static unsigned int
 qca_uniphy_pcs_inband_caps(struct phylink_pcs *pcs,
 			     phy_interface_t interface)
@@ -213,11 +106,6 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	u32 val;
-
-	if (!qca_uniphy_sgmii_calibration_done(upcs->uniphy)) {
-		state->link = false;
-		return;
-	}
 
 	regmap_read(upcs->uniphy->regmap,
 		    UNIPHY_CH_INPUT_OUTPUT_6(upcs->channel),
@@ -261,32 +149,94 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
+	unsigned long uniphy_rate;
+	u32 misc2_phy_mode;
+	u32 mode_ctrl;
+	int i, ret;
+	u32 val;
 
 	switch (interface) {
-	case PHY_INTERFACE_MODE_QSGMII:
-	case PHY_INTERFACE_MODE_PSGMII:
-		return qca_uniphy_psgmii_calibrate(uniphy, interface);
 	case PHY_INTERFACE_MODE_SGMII:
+		misc2_phy_mode = UNIPHY_MISC2_SGMII;
+		mode_ctrl = UNIPHY_SG_MODE;
+		uniphy_rate = 125000000;
+		break;
+	case PHY_INTERFACE_MODE_QSGMII:
+		mode_ctrl = UNIPHY_CH0_QSGMII_SGMII;
+		misc2_phy_mode = UNIPHY_MISC2_SGMII;
+		uniphy_rate = 125000000;
+		break;
+	case PHY_INTERFACE_MODE_PSGMII:
+		mode_ctrl = UNIPHY_CH0_PSGMII_QSGMII;
+		misc2_phy_mode = 0;
+		uniphy_rate = 125000000;
+		break;
 	case PHY_INTERFACE_MODE_2500BASEX:
-		if (interface == uniphy->current_mode)
-			return 0;
-
-		if (interface == PHY_INTERFACE_MODE_SGMII)
-			qca_uniphy_sgmii_setup(uniphy,
-				UNIPHY_MISC2_SGMII,
-				UNIPHY_SG_MODE | UNIPHY_SG_AUTONEG,
-				125000000);
-		else if (interface == PHY_INTERFACE_MODE_2500BASEX)
-			qca_uniphy_sgmii_setup(uniphy,
-				UNIPHY_MISC2_SGMIIPLUS,
-				UNIPHY_SGPLUS_MODE | UNIPHY_SG_AUTONEG,
-				312500000);
-
-		uniphy->current_mode = interface;
-		return 0;
+		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
+		mode_ctrl = UNIPHY_SGPLUS_MODE;
+		uniphy_rate = 312500000;
+		break;
 	default:
-		return 0;
+		return -EINVAL;
 	}
+
+	/* First update misc2 PHY mode... */
+	regmap_update_bits(uniphy->regmap, UNIPHY_MISC2_PHY_MODE,
+			   UNIPHY_MISC2_PHY_MODE, misc2_phy_mode);
+
+	/* ...and reset Analog */
+	regmap_clear_bits(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
+			  UNIPHY_PLL_RESET_ANALOG);
+	msleep(100);
+	regmap_set_bits(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
+			UNIPHY_PLL_RESET_ANALOG);
+	msleep(100);
+
+	/* Second assert XPCS... */
+	reset_control_assert(uniphy->rst_xpcs);
+
+	/* ...and disable PHY clock */
+	for (i = 2; i < uniphy->num_clks; i++)
+		clk_disable(uniphy->clks[i].clk);
+
+	/* Third update the mode ctrl... */
+	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
+			   UNIPHY_SGPLUS_MODE | UNIPHY_SG_MODE |
+			   UNIPHY_CH0_PSGMII_QSGMII | UNIPHY_CH0_QSGMII_SGMII |
+			   UNIPHY_AUTONEG_MODE_ATH, mode_ctrl);
+
+	/*
+	 * ...and execute soft reset...
+	 *
+	 * (soft reset is XPCS + all the UNIPHY PHY port reset,
+	 * XPCS gets indirectly deassert by the soft reset deassert.
+	 * It seems that resetting all at once is mandatory as from
+	 * lots of testing it has been verified that operating
+	 * on the single reset is problematic)
+	 */
+	reset_control_assert(uniphy->rst_soft);
+	msleep(100);
+	reset_control_deassert(uniphy->rst_soft);
+
+	/* ...and wait for calibration */
+	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
+				       val, val & UNIPHY_CALIBRATION_DONE,
+				       UNIPHY_CALIBRATION_POLL_US,
+				       UNIPHY_CALIBRATION_TIMEOUT_US);
+	if (ret) {
+		dev_err(uniphy->dev, "PCS calibration timeout\n");
+		return -EINVAL;
+	}
+
+	/* As last step enable all PHY clock... */
+	for (i = 2; i < uniphy->num_clks; i++)
+		clk_enable(uniphy->clks[i].clk);
+
+	/* ...and setup uniphy clock */
+	clk_set_rate(uniphy->rx_clk_ref, uniphy_rate);
+	clk_set_rate(uniphy->tx_clk_ref, uniphy_rate);
+
+	return 0;
 }
 
 static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
@@ -296,21 +246,6 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
-	u32 val;
-	int ret;
-
-	if (!uniphy->calibrated) {
-		ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
-					       val, val & UNIPHY_CALIBRATION_DONE,
-					       UNIPHY_CALIBRATION_POLL_US,
-					       UNIPHY_CALIBRATION_TIMEOUT_US);
-		if (ret) {
-			dev_err(uniphy->dev, "SGMII calibration timeout\n");
-			return;
-		}
-
-		qca_uniphy_sgmii_calibration_complete(uniphy);
-	}
 
 	regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
 			  UNIPHY_CH_ADP_SW_RSTN);
@@ -447,21 +382,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(uniphy->rst_xpcs),
 				     "failed to get xpcs reset\n");
 
-	if (of_property_read_bool(dev->of_node, "qcom,psgmii")) {
-		uniphy->rst_ports[0].id = "port1";
-		uniphy->rst_ports[1].id = "port2";
-		uniphy->rst_ports[2].id = "port3";
-		uniphy->rst_ports[3].id = "port4";
-		uniphy->rst_ports[4].id = "port5";
-		ret = devm_reset_control_bulk_get_optional_exclusive(dev,
-					ARRAY_SIZE(uniphy->rst_ports),
-					uniphy->rst_ports);
-		if (ret)
-			return dev_err_probe(dev, ret,
-					     "failed to get port resets\n");
-
-	}
-
 	uniphy->pll_rate = 125000000;
 
 	if (of_property_read_string_index(dev->of_node, "clock-output-names",
@@ -493,8 +413,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	if (IS_ERR(uniphy->tx_clk_ref))
 		return dev_err_probe(dev, PTR_ERR(uniphy->tx_clk_ref),
 				     "failed to get TX clock ref\n");
-
-	uniphy->calibrated = true;
 
 	for (i = 0; i < QCA_UNIPHY_CHANNELS; i++) {
 		uniphy->port_pcs[i].pcs.ops = &qca_uniphy_pcs_ops;
