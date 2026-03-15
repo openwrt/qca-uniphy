@@ -93,6 +93,7 @@ qca_uniphy_pcs_inband_caps(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
 	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_USXGMII:
 		return LINK_INBAND_DISABLE | LINK_INBAND_ENABLE;
 	case PHY_INTERFACE_MODE_2500BASEX:
 		return LINK_INBAND_DISABLE;
@@ -101,10 +102,9 @@ qca_uniphy_pcs_inband_caps(struct phylink_pcs *pcs,
 	}
 }
 
-static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
-				       struct phylink_link_state *state)
+static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy_pcs *upcs,
+                                           struct phylink_link_state *state)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	u32 val;
 
 	regmap_read(upcs->uniphy->regmap,
@@ -141,11 +141,74 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 	state->an_complete = state->link;
 }
 
-static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
-				   unsigned int neg_mode,
-				   phy_interface_t interface,
-				   const unsigned long *advertising,
-				   bool permit_pause_to_mac)
+static void qca_uniphy_pcs_get_state_usxgmii(struct qca_uniphy_pcs *upcs,
+                                             struct phylink_link_state *state)
+{
+	unsigned int val;
+	int ret;
+
+	ret = regmap_read(upcs->uniphy->regmap, XPCS_MII_AN_INTR_STS, &val);
+	if (ret) {
+		state->link = 0;
+		return;
+	}
+
+	state->link = !!(val & XPCS_USXG_AN_LINK_STS);
+
+	if (!state->link)
+		return;
+
+	switch (FIELD_GET(XPCS_USXG_AN_SPEED_MASK, val)) {
+	case XPCS_USXG_AN_SPEED_10000:
+		state->speed = SPEED_10000;
+		break;
+	case XPCS_USXG_AN_SPEED_5000:
+		state->speed = SPEED_5000;
+		break;
+	case XPCS_USXG_AN_SPEED_2500:
+		state->speed = SPEED_2500;
+		break;
+	case XPCS_USXG_AN_SPEED_1000:
+		state->speed = SPEED_1000;
+		break;
+	case XPCS_USXG_AN_SPEED_100:
+		state->speed = SPEED_100;
+		break;
+	case XPCS_USXG_AN_SPEED_10:
+		state->speed = SPEED_10;
+		break;
+	default:
+		state->link = false;
+		return;
+	}
+
+	state->duplex = DUPLEX_FULL;
+}
+
+static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
+				       struct phylink_link_state *state)
+{
+	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		qca_uniphy_pcs_get_state_sgmii(upcs, state);
+		break;
+	case PHY_INTERFACE_MODE_USXGMII:
+		qca_uniphy_pcs_get_state_usxgmii(upcs, state);
+		break;
+	default:
+		break;
+	}
+}
+
+static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
+                                      unsigned int neg_mode,
+                                      phy_interface_t interface,
+                                      const unsigned long *advertising,
+                                      bool permit_pause_to_mac)
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
@@ -170,6 +233,11 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 		mode_ctrl = UNIPHY_CH0_PSGMII_QSGMII;
 		misc2_phy_mode = 0;
 		uniphy_rate = 125000000;
+		break;
+	case PHY_INTERFACE_MODE_USXGMII:
+		misc2_phy_mode = UNIPHY_MISC2_USXGMII;
+		mode_ctrl = UNIPHY_XPCS_MODE;
+		uniphy_rate = 312500000;
 		break;
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
@@ -235,7 +303,93 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	clk_set_rate(uniphy->rx_clk_ref, uniphy_rate);
 	clk_set_rate(uniphy->tx_clk_ref, uniphy_rate);
 
+	if (interface == PHY_INTERFACE_MODE_USXGMII)
+		reset_control_deassert(uniphy->rst_xpcs);
+
 	return 0;
+}
+
+static int qca_uniphy_pcs_config_usxgmii(struct phylink_pcs *pcs,
+                                         unsigned int neg_mode,
+                                         phy_interface_t interface,
+                                         const unsigned long *advertising,
+                                         bool permit_pause_to_mac)
+{
+	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
+	int ret;
+
+	ret = qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
+	if (ret)
+		return ret;
+
+	ret = regmap_set_bits(uniphy->regmap, XPCS_DIG_CTRL, XPCS_USXG_EN);
+	if (ret)
+		return ret;
+
+	ret = regmap_set_bits(uniphy->regmap, XPCS_MII_AN_CTRL, XPCS_MII_AN_8BIT);
+	if (ret)
+		return ret;
+
+	return regmap_set_bits(uniphy->regmap, XPCS_MII_CTRL, XPCS_MII_AN_EN);
+}
+
+static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
+                                 unsigned int neg_mode,
+                                 phy_interface_t interface,
+                                 const unsigned long *advertising,
+                                 bool permit_pause_to_mac)
+{
+	switch (interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
+	case PHY_INTERFACE_MODE_USXGMII:
+		return qca_uniphy_pcs_config_usxgmii(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int uniphy_link_up_config_usxgmii(struct qca_uniphy *uniphy,
+                                         int speed)
+{
+	unsigned int val;
+	int ret;
+
+	switch (speed) {
+	case SPEED_10000:
+		val = XPCS_SPEED_10000;
+		break;
+	case SPEED_5000:
+		val = XPCS_SPEED_5000;
+		break;
+	case SPEED_2500:
+		val = XPCS_SPEED_2500;
+		break;
+	case SPEED_1000:
+		val = XPCS_SPEED_1000;
+		break;
+	case SPEED_100:
+		val = XPCS_SPEED_100;
+		break;
+	case SPEED_10:
+		val = XPCS_SPEED_10;
+		break;
+	default:
+		dev_err(uniphy->dev, "Invalid USXGMII speed %d\n", speed);
+		return -EINVAL;
+	}
+
+	/* Configure XPCS speed */
+	ret = regmap_update_bits(uniphy->regmap, XPCS_MII_CTRL,
+				 XPCS_SPEED_MASK, val | XPCS_DUPLEX_FULL);
+	if (ret)
+		return ret;
+
+	/* XPCS adapter reset */
+	return regmap_set_bits(uniphy->regmap, XPCS_DIG_CTRL, XPCS_USXG_ADPT_RESET);
 }
 
 static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
@@ -245,12 +399,28 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
+	int ret = 0;
 
-	regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+	switch (interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
 			  UNIPHY_CH_ADP_SW_RSTN);
-	usleep_range(1000, 2000);
-	regmap_set_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
-			UNIPHY_CH_ADP_SW_RSTN);
+		usleep_range(1000, 2000);
+		regmap_set_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+				UNIPHY_CH_ADP_SW_RSTN);
+		break;
+	case PHY_INTERFACE_MODE_USXGMII:
+		ret = uniphy_link_up_config_usxgmii(uniphy, speed);
+		break;
+	default:
+		return;
+	}
+
+	if (ret)
+		dev_err(uniphy->dev, "PCS link up fail for interface %s\n",
+			phy_modes(interface));
 }
 
 static const struct phylink_pcs_ops qca_uniphy_pcs_ops = {
@@ -325,10 +495,46 @@ static void qca_uniphy_clk_disable_unprepare(void *data)
 	clk_bulk_disable_unprepare(uniphy->num_clks, uniphy->clks);
 }
 
+static int uniphy_pcs_regmap_read(void *context, unsigned int reg,
+                                  unsigned int *val)
+{
+	struct qca_uniphy *uniphy = context;
+
+	/* PCS uses direct AHB access while XPCS uses indirect AHB access */
+	if (reg >= XPCS_INDIRECT_ADDR) {
+		writel(FIELD_GET(XPCS_INDIRECT_ADDR_H, reg),
+		       uniphy->base + XPCS_INDIRECT_AHB_ADDR);
+		*val = readl(uniphy->base + XPCS_INDIRECT_DATA_ADDR(reg));
+	} else {
+		*val = readl(uniphy->base + reg);
+	}
+
+	return 0;
+}
+
+static int uniphy_pcs_regmap_write(void *context, unsigned int reg,
+                                   unsigned int val)
+{
+	struct qca_uniphy *uniphy = context;
+
+	/* PCS uses direct AHB access while XPCS uses indirect AHB access */
+	if (reg >= XPCS_INDIRECT_ADDR) {
+		writel(FIELD_GET(XPCS_INDIRECT_ADDR_H, reg),
+		       uniphy->base + XPCS_INDIRECT_AHB_ADDR);
+		writel(val, uniphy->base + XPCS_INDIRECT_DATA_ADDR(reg));
+	} else {
+		writel(val, uniphy->base + reg);
+	}
+
+	return 0;
+}
+
 static const struct regmap_config uniphy_regmap_cfg = {
 	.reg_bits = 32,
-	.reg_stride = 4,
 	.val_bits = 32,
+	.reg_read = uniphy_pcs_regmap_read,
+	.reg_write = uniphy_pcs_regmap_write,
+	.fast_io = true,
 };
 
 static int qca_uniphy_probe(struct platform_device *pdev)
@@ -336,7 +542,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct clk_bulk_data *clks;
 	struct qca_uniphy *uniphy;
-	void __iomem *base;
 	const char *name;
 	int ret, i, num_clks;
 
@@ -346,11 +551,11 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 
 	uniphy->dev = dev;
 
-	base = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(base))
-		return dev_err_probe(dev, PTR_ERR(base), "failed to ioremap resource");
+	uniphy->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(uniphy->base))
+		return dev_err_probe(dev, PTR_ERR(uniphy->base), "failed to ioremap resource");
 
-	uniphy->regmap = devm_regmap_init_mmio(dev, base, &uniphy_regmap_cfg);
+	uniphy->regmap = devm_regmap_init(dev, NULL, uniphy, &uniphy_regmap_cfg);
 	if (IS_ERR(uniphy->regmap))
 		return dev_err_probe(dev, PTR_ERR(uniphy->regmap),
 				     "failed to init regmap");
