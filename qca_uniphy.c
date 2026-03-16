@@ -182,7 +182,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 
 	/* First update misc2 PHY mode... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MISC2_PHY_MODE,
-			   UNIPHY_MISC2_PHY_MODE, misc2_phy_mode);
+			   UNIPHY_MISC2_PHY_MODE_MASK, misc2_phy_mode);
 
 	/* ...and reset Analog */
 	regmap_clear_bits(uniphy->regmap, UNIPHY_PLL_POWER_ON_AND_RESET,
