@@ -33,41 +33,23 @@ qca_uniphy_clk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 {
 	struct qca_uniphy_clk *uclk =
 		container_of(hw, struct qca_uniphy_clk, hw);
+	struct qca_uniphy *uniphy = uclk->uniphy;
+	u32 val;
 
-	return uclk->uniphy->pll_rate;
-}
-
-static int
-qca_uniphy_clk_determine_rate(struct clk_hw *hw,
-				struct clk_rate_request *req)
-{
-	if (req->rate <= 125000000)
-		req->rate = 125000000;
-	else
-		req->rate = 312500000;
-
-	return 0;
-}
-
-static int
-qca_uniphy_clk_set_rate(struct clk_hw *hw, unsigned long rate,
-			  unsigned long parent_rate)
-{
-	struct qca_uniphy_clk *uclk =
-		container_of(hw, struct qca_uniphy_clk, hw);
-
-	if (rate != 125000000 && rate != 312500000)
-		return -EINVAL;
-
-	uclk->uniphy->pll_rate = rate;
+	/*
+	 * UNIPHY switch reference clock based on the configured
+	 * PHY mode.
+	 */
+	regmap_read(uniphy->regmap, UNIPHY_MODE_CTRL, &val);
+	if (val & UNIPHY_CH0_PSGMII_QSGMII ||
+	    val & UNIPHY_CH0_QSGMII_SGMII)
+		return 125000000;
 
 	return 0;
 }
 
 static const struct clk_ops qca_uniphy_clk_ops = {
 	.recalc_rate = qca_uniphy_clk_recalc_rate,
-	.determine_rate = qca_uniphy_clk_determine_rate,
-	.set_rate = qca_uniphy_clk_set_rate,
 };
 
 static int qca_uniphy_clk_register(struct qca_uniphy *uniphy,
@@ -77,6 +59,8 @@ static int qca_uniphy_clk_register(struct qca_uniphy *uniphy,
 	struct clk_init_data init = {
 		.name = name,
 		.ops = &qca_uniphy_clk_ops,
+		/* always derive rate from the UNIPHY register */
+		.flags = CLK_GET_RATE_NOCACHE,
 	};
 
 	uclk->hw.init = &init;
@@ -149,32 +133,27 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
-	unsigned long uniphy_rate;
 	u32 misc2_phy_mode;
 	u32 mode_ctrl;
-	int i, ret;
 	u32 val;
+	int ret;
 
 	switch (interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 		misc2_phy_mode = UNIPHY_MISC2_SGMII;
 		mode_ctrl = UNIPHY_SGMII_MODE;
-		uniphy_rate = 125000000;
 		break;
 	case PHY_INTERFACE_MODE_QSGMII:
 		mode_ctrl = UNIPHY_CH0_QSGMII_SGMII;
 		misc2_phy_mode = UNIPHY_MISC2_SGMII;
-		uniphy_rate = 125000000;
 		break;
 	case PHY_INTERFACE_MODE_PSGMII:
 		mode_ctrl = UNIPHY_CH0_PSGMII_QSGMII;
 		misc2_phy_mode = 0;
-		uniphy_rate = 125000000;
 		break;
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
-		uniphy_rate = 312500000;
 		break;
 	default:
 		return -EINVAL;
@@ -196,8 +175,8 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	reset_control_assert(uniphy->rst_xpcs);
 
 	/* ...and disable PHY clock */
-	for (i = 2; i < uniphy->num_clks; i++)
-		clk_disable(uniphy->clks[i].clk);
+	clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
+	clk_disable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
 
 	/* Third update the mode ctrl... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
@@ -227,13 +206,9 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 		return -EINVAL;
 	}
 
-	/* As last step enable all PHY clock... */
-	for (i = 2; i < uniphy->num_clks; i++)
-		clk_enable(uniphy->clks[i].clk);
-
-	/* ...and setup uniphy clock */
-	clk_set_rate(uniphy->rx_clk_ref, uniphy_rate);
-	clk_set_rate(uniphy->tx_clk_ref, uniphy_rate);
+	/* As last step enable PHY clock... */
+	clk_enable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
+	clk_enable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
 
 	return 0;
 }
@@ -245,6 +220,32 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
+	unsigned long uniphy_rate;
+
+	switch (interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		switch (speed) {
+		case SPEED_10:
+			uniphy_rate = 2500000;
+			break;
+		case SPEED_100:
+			uniphy_rate = 25000000;
+			break;
+		case SPEED_1000:
+			uniphy_rate = 125000000;
+			break;
+		default:
+			return;
+		}
+		break;
+	default:
+		return;
+	}
+
+	clk_set_rate(uniphy->clks[port_rx_clk_idx(upcs)].clk, uniphy_rate);
+	clk_set_rate(uniphy->clks[port_tx_clk_idx(upcs)].clk, uniphy_rate);
 
 	regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
 			  UNIPHY_CH_ADP_SW_RSTN);
@@ -381,8 +382,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(uniphy->rst_xpcs),
 				     "failed to get xpcs reset\n");
 
-	uniphy->pll_rate = 125000000;
-
 	if (of_property_read_string_index(dev->of_node, "clock-output-names",
 					  0, &name))
 		return -ENODEV;
@@ -392,12 +391,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret,
 				     "failed to register RX clock\n");
 
-	uniphy->rx_clk_ref = devm_clk_hw_get_clk(dev, &uniphy->rx_clk.hw,
-						   "uniphy_rx");
-	if (IS_ERR(uniphy->rx_clk_ref))
-		return dev_err_probe(dev, PTR_ERR(uniphy->rx_clk_ref),
-				     "failed to get RX clock ref\n");
-
 	if (of_property_read_string_index(dev->of_node, "clock-output-names",
 					  1, &name))
 			return -ENODEV;
@@ -406,12 +399,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "failed to register TX clock\n");
-
-	uniphy->tx_clk_ref = devm_clk_hw_get_clk(dev, &uniphy->tx_clk.hw,
-						   "uniphy_tx");
-	if (IS_ERR(uniphy->tx_clk_ref))
-		return dev_err_probe(dev, PTR_ERR(uniphy->tx_clk_ref),
-				     "failed to get TX clock ref\n");
 
 	for (i = 0; i < QCA_UNIPHY_CHANNELS; i++) {
 		uniphy->port_pcs[i].pcs.ops = &qca_uniphy_pcs_ops;

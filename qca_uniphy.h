@@ -63,14 +63,13 @@ struct qca_uniphy {
 	struct reset_control_bulk_data rst_ports[QCA_UNIPHY_CHANNELS];
 	struct clk_bulk_data *clks;
 	int num_clks;
-	unsigned long sgmii_rate;
 	struct qca_uniphy_pcs port_pcs[QCA_UNIPHY_CHANNELS];
 	struct qca_uniphy_clk rx_clk;
 	struct qca_uniphy_clk tx_clk;
-	struct clk *rx_clk_ref;
-	struct clk *tx_clk_ref;
-	unsigned long pll_rate;
 };
+
+#define port_rx_clk_idx(upcs)	((upcs)->channel * 2) + 2
+#define port_tx_clk_idx(upcs)	(((upcs)->channel * 2) + 1) + 2
 
 struct phylink_pcs *qca_uniphy_pcs_get(struct device *dev,
 				       struct device_node *np,
