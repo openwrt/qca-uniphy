@@ -44,7 +44,8 @@ qca_uniphy_clk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 	if (val & UNIPHY_CH0_PSGMII_QSGMII ||
 	    val & UNIPHY_CH0_QSGMII_SGMII)
 		return 125000000;
-	else if (val & UNIPHY_XPCS_MODE)
+	else if (val & UNIPHY_SGPLUS_MODE ||
+		 val & UNIPHY_XPCS_MODE)
 		return 312500000;
 
 	return 0;
@@ -75,17 +76,7 @@ static unsigned int
 qca_uniphy_pcs_inband_caps(struct phylink_pcs *pcs,
 			   phy_interface_t interface)
 {
-	switch (interface) {
-	case PHY_INTERFACE_MODE_QSGMII:
-	case PHY_INTERFACE_MODE_PSGMII:
-	case PHY_INTERFACE_MODE_SGMII:
-	case PHY_INTERFACE_MODE_USXGMII:
-		return LINK_INBAND_DISABLE | LINK_INBAND_ENABLE;
-	case PHY_INTERFACE_MODE_2500BASEX:
-		return LINK_INBAND_DISABLE;
-	default:
-		return 0;
-	}
+	return LINK_INBAND_DISABLE | LINK_INBAND_ENABLE;
 }
 
 static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy *uniphy,
@@ -118,6 +109,32 @@ static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy *uniphy,
 		state->link = false;
 		return;
 	}
+
+	state->pause = 0;
+	if (val & UNIPHY_CH_RX_PAUSE)
+		state->pause |= MLO_PAUSE_RX;
+	if (val & UNIPHY_CH_TX_PAUSE)
+		state->pause |= MLO_PAUSE_TX;
+
+	state->an_complete = state->link;
+}
+
+static void qca_uniphy_pcs_get_state_hsgmii(struct qca_uniphy *uniphy,
+					    int channel,
+					    struct phylink_link_state *state)
+{
+	u32 val;
+
+	regmap_read(uniphy->regmap,
+		    UNIPHY_CH_INPUT_OUTPUT_6(channel),
+		    &val);
+
+	state->link = !!(val & UNIPHY_CH_LINK);
+	if (!state->link)
+		return;
+
+	state->speed = SPEED_2500;
+	state->duplex = DUPLEX_FULL;
 
 	state->pause = 0;
 	if (val & UNIPHY_CH_RX_PAUSE)
@@ -185,6 +202,10 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 		qca_uniphy_pcs_get_state_sgmii(uniphy, upcs->channel,
 					       state);
 		break;
+	case PHY_INTERFACE_MODE_2500BASEX:
+		qca_uniphy_pcs_get_state_hsgmii(uniphy, upcs->channel,
+						state);
+		break;
 	case PHY_INTERFACE_MODE_USXGMII:
 		qca_uniphy_pcs_get_state_usxgmii(uniphy, state);
 		break;
@@ -226,6 +247,9 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
+		if (neg_mode == PHYLINK_PCS_NEG_INBAND)
+			mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
+						0x2);
 		break;
 	default:
 		return -EINVAL;
@@ -252,7 +276,8 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 
 	/* Third update the mode ctrl... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
-			   UNIPHY_MODE_SEL_MASK | UNIPHY_AUTONEG_MODE_ATH,
+			   UNIPHY_MODE_SEL_MASK | UNIPHY_CH0_MODE_CTRL_25M |
+			   UNIPHY_AUTONEG_MODE_ATH,
 			   mode_ctrl);
 
 	/*
@@ -323,6 +348,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
+	case PHY_INTERFACE_MODE_2500BASEX:
 		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	case PHY_INTERFACE_MODE_USXGMII:
 		return qca_uniphy_pcs_config_usxgmii(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
@@ -340,18 +366,36 @@ static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
 	unsigned long uniphy_rate;
 	int ret;
 
-	switch (speed) {
-	case SPEED_10:
-		uniphy_rate = 2500000;
+	switch (interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		switch (speed) {
+		case SPEED_10:
+			uniphy_rate = 2500000;
+			break;
+		case SPEED_100:
+			uniphy_rate = 25000000;
+			break;
+		case SPEED_1000:
+			uniphy_rate = 125000000;
+			break;
+		default:
+			dev_err(uniphy->dev, "Invalid SGMII speed %d\n", speed);
+			return -EINVAL;
+		}
 		break;
-	case SPEED_100:
-		uniphy_rate = 25000000;
-		break;
-	case SPEED_1000:
-		uniphy_rate = 125000000;
+	case PHY_INTERFACE_MODE_2500BASEX:
+		switch (speed) {
+		case SPEED_2500:
+			uniphy_rate = 312500000;
+			break;
+		default:
+			dev_err(uniphy->dev, "Invalid 2500BaseX speed %d\n", speed);
+			return -EINVAL;
+		}
 		break;
 	default:
-		dev_err(uniphy->dev, "Invalid SGMII speed %d\n", speed);
 		return -EINVAL;
 	}
 
@@ -432,6 +476,7 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
+	case PHY_INTERFACE_MODE_2500BASEX:
 		ret = uniphy_link_up_sgmii(pcs, interface, speed);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
