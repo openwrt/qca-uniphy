@@ -45,6 +45,9 @@ qca_uniphy_clk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 	    val & UNIPHY_CH0_QSGMII_SGMII)
 		return 125000000;
 
+	if (val & UNIPHY_SGPLUS_MODE)
+		return 312500000;
+
 	return 0;
 }
 
@@ -85,14 +88,14 @@ qca_uniphy_pcs_inband_caps(struct phylink_pcs *pcs,
 	}
 }
 
-static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
-				       struct phylink_link_state *state)
+static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy *uniphy,
+					   int channel,
+					   struct phylink_link_state *state)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	u32 val;
 
-	regmap_read(upcs->uniphy->regmap,
-		    UNIPHY_CH_INPUT_OUTPUT_6(upcs->channel),
+	regmap_read(uniphy->regmap,
+		    UNIPHY_CH_INPUT_OUTPUT_6(channel),
 		    &val);
 
 	state->link = !!(val & UNIPHY_CH_LINK);
@@ -125,6 +128,47 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 	state->an_complete = state->link;
 }
 
+static void qca_uniphy_pcs_get_state_hsgmii(struct qca_uniphy *uniphy,
+					    int channel,
+					    struct phylink_link_state *state)
+{
+	u32 val;
+
+	regmap_read(uniphy->regmap,
+		    UNIPHY_CH_INPUT_OUTPUT_6(channel),
+		    &val);
+
+	state->link = !!(val & UNIPHY_CH_LINK);
+	if (!state->link)
+		return;
+
+	state->speed = SPEED_2500;
+	state->duplex = DUPLEX_FULL;
+	state->an_complete = state->link;
+}
+
+static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
+				     struct phylink_link_state *state)
+{
+	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
+
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+		qca_uniphy_pcs_get_state_sgmii(uniphy, upcs->channel,
+					       state);
+		break;
+	case PHY_INTERFACE_MODE_2500BASEX:
+		qca_uniphy_pcs_get_state_hsgmii(uniphy, upcs->channel,
+						state);
+		break;
+	default:
+		return;
+	}
+}
+
 static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 				   unsigned int neg_mode,
 				   phy_interface_t interface,
@@ -154,6 +198,8 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
+		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M, 0x2);
+		// mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		break;
 	default:
 		return -EINVAL;
@@ -180,7 +226,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 
 	/* Third update the mode ctrl... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
-			   UNIPHY_MODE_SEL_MASK | UNIPHY_AUTONEG_MODE_ATH,
+			   UNIPHY_MODE_SEL_MASK | UNIPHY_CH0_MODE_CTRL_25M | UNIPHY_AUTONEG_MODE_ATH,
 			   mode_ctrl);
 
 	/*
@@ -239,6 +285,9 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 		default:
 			return;
 		}
+		break;
+	case PHY_INTERFACE_MODE_2500BASEX:
+		uniphy_rate = 312500000;
 		break;
 	default:
 		return;
