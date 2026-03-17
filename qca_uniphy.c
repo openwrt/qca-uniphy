@@ -11,6 +11,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/iopoll.h>
@@ -314,6 +315,10 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 		dev_err(uniphy->dev, "PCS calibration timeout\n");
 		return -EINVAL;
 	}
+
+	/* Trigger UNIPHY ref clock to recal rate */
+	clk_hw_recalc_rate(&uniphy->rx_clk.hw);
+	clk_hw_recalc_rate(&uniphy->tx_clk.hw);
 
 	/* As last step enable PHY clock... */
 	clk_enable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
