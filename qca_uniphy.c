@@ -331,6 +331,44 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	}
 }
 
+static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
+				phy_interface_t interface,
+				int speed)
+{
+	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
+	unsigned long uniphy_rate;
+	int ret;
+
+	switch (speed) {
+	case SPEED_10:
+		uniphy_rate = 2500000;
+		break;
+	case SPEED_100:
+		uniphy_rate = 25000000;
+		break;
+	case SPEED_1000:
+		uniphy_rate = 125000000;
+		break;
+	default:
+		dev_err(uniphy->dev, "Invalid SGMII speed %d\n", speed);
+		return -EINVAL;
+	}
+
+	clk_set_rate(uniphy->clks[port_rx_clk_idx(upcs)].clk, uniphy_rate);
+	clk_set_rate(uniphy->clks[port_tx_clk_idx(upcs)].clk, uniphy_rate);
+
+	ret = regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+				UNIPHY_CH_ADP_SW_RSTN);
+	if (ret)
+		return ret;
+
+	usleep_range(1000, 2000);
+
+	return regmap_set_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+			       UNIPHY_CH_ADP_SW_RSTN);
+}
+
 static int uniphy_link_up_usxgmii(struct phylink_pcs *pcs, int speed)
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
@@ -388,35 +426,13 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
-	unsigned long uniphy_rate;
 	int ret = 0;
 
 	switch (interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
-		switch (speed) {
-		case SPEED_10:
-			uniphy_rate = 2500000;
-			break;
-		case SPEED_100:
-			uniphy_rate = 25000000;
-			break;
-		case SPEED_1000:
-			uniphy_rate = 125000000;
-			break;
-		default:
-			return;
-		}
-
-		clk_set_rate(uniphy->clks[port_rx_clk_idx(upcs)].clk, uniphy_rate);
-		clk_set_rate(uniphy->clks[port_tx_clk_idx(upcs)].clk, uniphy_rate);
-
-		regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
-			  UNIPHY_CH_ADP_SW_RSTN);
-		usleep_range(1000, 2000);
-		regmap_set_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
-				UNIPHY_CH_ADP_SW_RSTN);
+		ret = uniphy_link_up_sgmii(pcs, interface, speed);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
 		ret = uniphy_link_up_usxgmii(pcs, speed);
