@@ -41,7 +41,8 @@ qca_uniphy_clk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 	 * PHY mode.
 	 */
 	regmap_read(uniphy->regmap, UNIPHY_MODE_CTRL, &val);
-	if (val & UNIPHY_CH0_PSGMII_QSGMII ||
+	if (val & UNIPHY_SGMII_MODE ||
+	    val & UNIPHY_CH0_PSGMII_QSGMII ||
 	    val & UNIPHY_CH0_QSGMII_SGMII)
 		return 125000000;
 	else if (val & UNIPHY_SGPLUS_MODE ||
