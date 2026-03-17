@@ -200,6 +200,7 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
+	case PHY_INTERFACE_MODE_1000BASEX:
 		qca_uniphy_pcs_get_state_sgmii(uniphy, upcs->channel,
 					       state);
 		break;
@@ -229,9 +230,14 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	int ret;
 
 	switch (interface) {
+	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_SGMII:
 		misc2_phy_mode = UNIPHY_MISC2_SGMII;
 		mode_ctrl = UNIPHY_SGMII_MODE;
+		if (interface == PHY_INTERFACE_MODE_SGMII &&
+		    neg_mode == PHYLINK_PCS_NEG_INBAND)
+			mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
+						0x2);
 		break;
 	case PHY_INTERFACE_MODE_QSGMII:
 		mode_ctrl = UNIPHY_CH0_QSGMII_SGMII;
@@ -349,6 +355,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
+	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
 		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	case PHY_INTERFACE_MODE_USXGMII:
@@ -383,6 +390,16 @@ static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
 			break;
 		default:
 			dev_err(uniphy->dev, "Invalid SGMII speed %d\n", speed);
+			return -EINVAL;
+		}
+		break;
+	case PHY_INTERFACE_MODE_1000BASEX:
+		switch (speed) {
+		case SPEED_1000:
+			uniphy_rate = 125000000;
+			break;
+		default:
+			dev_err(uniphy->dev, "Invalid 1000BaseX speed %d\n", speed);
 			return -EINVAL;
 		}
 		break;
@@ -477,6 +494,7 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
+	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
 		ret = uniphy_link_up_sgmii(pcs, interface, speed);
 		break;
