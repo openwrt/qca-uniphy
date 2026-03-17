@@ -88,13 +88,14 @@ qca_uniphy_pcs_inband_caps(struct phylink_pcs *pcs,
 	}
 }
 
-static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy_pcs *upcs,
+static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy *uniphy,
+					   int channel,
 					   struct phylink_link_state *state)
 {
 	u32 val;
 
-	regmap_read(upcs->uniphy->regmap,
-		    UNIPHY_CH_INPUT_OUTPUT_6(upcs->channel),
+	regmap_read(uniphy->regmap,
+		    UNIPHY_CH_INPUT_OUTPUT_6(channel),
 		    &val);
 
 	state->link = !!(val & UNIPHY_CH_LINK);
@@ -127,13 +128,13 @@ static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy_pcs *upcs,
 	state->an_complete = state->link;
 }
 
-static void qca_uniphy_pcs_get_state_usxgmii(struct qca_uniphy_pcs *upcs,
+static void qca_uniphy_pcs_get_state_usxgmii(struct qca_uniphy *uniphy,
 					     struct phylink_link_state *state)
 {
 	unsigned int val;
 	int ret;
 
-	ret = regmap_read(upcs->uniphy->regmap, XPCS_MII_AN_INTR_STS, &val);
+	ret = regmap_read(uniphy->regmap, XPCS_MII_AN_INTR_STS, &val);
 	if (ret) {
 		state->link = 0;
 		return;
@@ -175,15 +176,17 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 				     struct phylink_link_state *state)
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
 
 	switch (state->interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
-		qca_uniphy_pcs_get_state_sgmii(upcs, state);
+		qca_uniphy_pcs_get_state_sgmii(uniphy, upcs->channel,
+					       state);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
-		qca_uniphy_pcs_get_state_usxgmii(upcs, state);
+		qca_uniphy_pcs_get_state_usxgmii(uniphy, state);
 		break;
 	default:
 		break;
