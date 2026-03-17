@@ -209,6 +209,7 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 						state);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
+	case PHY_INTERFACE_MODE_10GBASER:
 		qca_uniphy_pcs_get_state_usxgmii(uniphy, state);
 		break;
 	default:
@@ -248,8 +249,12 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 		misc2_phy_mode = 0;
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
-		misc2_phy_mode = UNIPHY_MISC2_USXGMII;
 		mode_ctrl = UNIPHY_XPCS_MODE;
+		misc2_phy_mode = UNIPHY_MISC2_USXGMII;
+		break;
+	case PHY_INTERFACE_MODE_10GBASER:
+		mode_ctrl = UNIPHY_XPCS_MODE;
+		misc2_phy_mode = 0;
 		break;
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
@@ -314,7 +319,8 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	clk_enable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
 	clk_enable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
 
-	if (interface == PHY_INTERFACE_MODE_USXGMII)
+	if (interface == PHY_INTERFACE_MODE_USXGMII ||
+	    interface == PHY_INTERFACE_MODE_10GBASER)
 		reset_control_deassert(uniphy->rst_xpcs);
 
 	return 0;
@@ -359,6 +365,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_2500BASEX:
 		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	case PHY_INTERFACE_MODE_USXGMII:
+	case PHY_INTERFACE_MODE_10GBASER:
 		return qca_uniphy_pcs_config_usxgmii(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	default:
 		return -EOPNOTSUPP;
@@ -499,6 +506,7 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 		ret = uniphy_link_up_sgmii(pcs, interface, speed);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
+	case PHY_INTERFACE_MODE_10GBASER:
 		ret = uniphy_link_up_usxgmii(pcs, speed);
 		break;
 	default:
