@@ -331,8 +331,7 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	}
 }
 
-static int uniphy_link_up_config_usxgmii(struct phylink_pcs *pcs,
-					 int speed)
+static int uniphy_link_up_usxgmii(struct phylink_pcs *pcs, int speed)
 {
 	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
@@ -420,7 +419,7 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 				UNIPHY_CH_ADP_SW_RSTN);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
-		ret = uniphy_link_up_config_usxgmii(pcs, speed);
+		ret = uniphy_link_up_usxgmii(pcs, speed);
 		break;
 	default:
 		return;
