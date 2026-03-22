@@ -191,6 +191,27 @@ static void qca_uniphy_pcs_get_state_usxgmii(struct qca_uniphy *uniphy,
 	state->duplex = DUPLEX_FULL;
 }
 
+static void qca_uniphy_pcs_get_state_10base_r(struct qca_uniphy *uniphy,
+					      struct phylink_link_state *state)
+{
+	unsigned int val;
+	int ret;
+
+	ret = regmap_read(uniphy->regmap, XPCS_KR_STS1, &val);
+	if (ret) {
+		state->link = 0;
+		return;
+	}
+
+	state->link = !!(val & XPCS_KR_STS1_PLU);
+
+	if (!state->link)
+		return;
+
+	state->speed = SPEED_10000;
+	state->duplex = DUPLEX_FULL;
+}
+
 static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 				     struct phylink_link_state *state)
 {
@@ -210,8 +231,10 @@ static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 						state);
 		break;
 	case PHY_INTERFACE_MODE_USXGMII:
-	case PHY_INTERFACE_MODE_10GBASER:
 		qca_uniphy_pcs_get_state_usxgmii(uniphy, state);
+		break;
+	case PHY_INTERFACE_MODE_10GBASER:
+		qca_uniphy_pcs_get_state_10base_r(uniphy, state);
 		break;
 	default:
 		break;
@@ -345,15 +368,21 @@ static int qca_uniphy_pcs_config_usxgmii(struct phylink_pcs *pcs,
 	if (ret)
 		return ret;
 
-	ret = regmap_set_bits(uniphy->regmap, XPCS_DIG_CTRL, XPCS_USXG_EN);
+	ret = regmap_update_bits(uniphy->regmap, XPCS_DIG_CTRL,
+				 XPCS_USXG_EN,
+				 interface == PHY_INTERFACE_MODE_USXGMII ? XPCS_USXG_EN : 0);
 	if (ret)
 		return ret;
 
-	ret = regmap_set_bits(uniphy->regmap, XPCS_MII_AN_CTRL, XPCS_MII_AN_8BIT);
+	ret = regmap_update_bits(uniphy->regmap, XPCS_MII_AN_CTRL,
+				 XPCS_MII_AN_8BIT,
+				 interface == PHY_INTERFACE_MODE_USXGMII ? XPCS_MII_AN_8BIT : 0);
 	if (ret)
 		return ret;
 
-	return regmap_set_bits(uniphy->regmap, XPCS_MII_CTRL, XPCS_MII_AN_EN);
+	return regmap_update_bits(uniphy->regmap, XPCS_MII_CTRL,
+				  XPCS_MII_AN_EN,
+				  interface == PHY_INTERFACE_MODE_USXGMII ? XPCS_MII_AN_EN : 0);
 }
 
 static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
