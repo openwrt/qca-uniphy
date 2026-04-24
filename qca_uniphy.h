@@ -10,6 +10,11 @@
 
 #define QCA_UNIPHY_CHANNELS		5
 
+#define IPQ5018_UNIPHY_REFCLK		0x74
+#define  IPQ5018_UNIPHY_REFCLK_EN	BIT(0)
+#define  IPQ5018_UNIPHY_REFCLK_DIV	BIT(1)	/* 0 (default): 50MHz, 1: 25MHz */
+#define  IPQ5018_UNIPHY_REFCLK_DS	GENMASK(3, 2) /* 0: 2.8V, 1 (default): 1.5V */
+
 #define UNIPHY_OFFSET_CALIB_4		0x1e0
 #define   UNIPHY_CALIBRATION_DONE	BIT(7)
 
@@ -27,7 +32,9 @@
 #define   UNIPHY_CH0_PSGMII_QSGMII	BIT(9)
 #define   UNIPHY_CH0_QSGMII_SGMII	BIT(8)
 #define   UNIPHY_CH0_MODE_CTRL_25M	GENMASK(6, 4)
-#define   UNIPHY_AUTONEG_MODE_ATH	BIT(0)
+#define   UNIPHY_CH0_MODE_1000BASEX	0
+#define   UNIPHY_CH0_MODE_MAC		2
+#define   UNIPHY_AUTONEG_MODE_ATH	BIT(0) /* 0: atheros, 1: standard */
 
 #define UNIPHY_PLL_POWER_ON_AND_RESET	0x780
 #define   UNIPHY_PLL_RESET_ANALOG	BIT(6)
@@ -38,6 +45,7 @@
 #define   UNIPHY_CH_ADP_SW_RSTN		BIT(11)
 #define   UNIPHY_CH_RX_PAUSE		BIT(0)
 #define   UNIPHY_CH_TX_PAUSE		BIT(1)
+#define   UNIPHY_CH_FORCE_MODE		BIT(3)
 #define   UNIPHY_CH_SPEED_MODE		GENMASK(5, 4)
 #define   UNIPHY_CH_DUPLEX		BIT(6)
 #define   UNIPHY_CH_LINK		BIT(7)
@@ -88,6 +96,12 @@
 #define UNIPHY_CALIBRATION_TIMEOUT_US	100000
 #define UNIPHY_CALIBRATION_POLL_US	1000
 
+enum qca_uniphy_type {
+	UNIPHY_IPQ5018,
+	UNIPHY_IPQ6018,
+	UNIPHY_IPQ8074,
+};
+
 struct qca_uniphy;
 
 struct qca_uniphy_clk {
@@ -99,6 +113,12 @@ struct qca_uniphy_pcs {
 	struct phylink_pcs pcs;
 	struct qca_uniphy *uniphy;
 	int channel;
+	unsigned int mode;
+};
+
+struct qca_uniphy_match_data {
+	enum qca_uniphy_type uniphy_type;
+	bool ref_clk_enable;
 };
 
 #define to_qca_uniphy_pcs(n) container_of(pcs, struct qca_uniphy_pcs, pcs);
@@ -107,14 +127,17 @@ struct qca_uniphy {
 	struct device *dev;
 	void __iomem *base;
 	struct regmap *regmap;
+	struct reset_control *rst_ahb;
 	struct reset_control *rst_soft;
 	struct reset_control *rst_xpcs;
-	struct reset_control_bulk_data rst_ports[QCA_UNIPHY_CHANNELS];
 	struct clk_bulk_data *clks;
 	int num_clks;
 	struct qca_uniphy_pcs port_pcs[QCA_UNIPHY_CHANNELS];
 	struct qca_uniphy_clk rx_clk;
 	struct qca_uniphy_clk tx_clk;
+	struct qca_uniphy_clk ref_clk;
+	const struct qca_uniphy_match_data *data;
+	phy_interface_t interface;
 };
 
 #define port_rx_clk_idx(upcs)	((upcs)->channel * 2) + 2

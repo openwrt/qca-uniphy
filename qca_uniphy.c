@@ -11,6 +11,7 @@
  */
 
 #include <linux/bitfield.h>
+#include <linux/clk/clk-conf.h>
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -23,6 +24,23 @@
 #include <linux/regmap.h>
 
 #include "qca_uniphy.h"
+
+#include <dt-bindings/net/qca-uniphy.h>
+
+static const struct qca_uniphy_match_data ipq5018_data = {
+	.uniphy_type	= UNIPHY_IPQ5018,
+	.ref_clk_enable	= true,
+};
+
+static const struct qca_uniphy_match_data ipq6018_data = {
+	.uniphy_type	= UNIPHY_IPQ6018,
+	.ref_clk_enable	= false,
+};
+
+static const struct qca_uniphy_match_data ipq8074_data = {
+	.uniphy_type	= UNIPHY_IPQ8074,
+	.ref_clk_enable	= false,
+};
 
 static unsigned long
 qca_uniphy_clk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
@@ -67,6 +85,196 @@ static int qca_uniphy_clk_register(struct qca_uniphy *uniphy,
 	uclk->uniphy = uniphy;
 
 	return devm_clk_hw_register(uniphy->dev, &uclk->hw);
+}
+
+static int
+qca_uniphy_refclk_enable(struct clk_hw *hw)
+{
+	struct qca_uniphy_clk *uclk =
+		container_of(hw, struct qca_uniphy_clk, hw);
+	struct qca_uniphy *uniphy = uclk->uniphy;
+
+	switch (uniphy->data->uniphy_type) {
+	case UNIPHY_IPQ5018:
+		if (!clk_hw_is_enabled(&uclk->hw)) {
+			regmap_update_bits(uniphy->regmap, IPQ5018_UNIPHY_REFCLK,
+					IPQ5018_UNIPHY_REFCLK_EN |
+					IPQ5018_UNIPHY_REFCLK_DS,
+					IPQ5018_UNIPHY_REFCLK_EN |
+					FIELD_PREP(IPQ5018_UNIPHY_REFCLK_DS, 1));
+		}
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int
+qca_uniphy_refclk_is_enabled(struct clk_hw *hw)
+{
+	struct qca_uniphy_clk *uclk =
+		container_of(hw, struct qca_uniphy_clk, hw);
+	struct qca_uniphy *uniphy = uclk->uniphy;
+	u32 val;
+
+	switch (uniphy->data->uniphy_type) {
+	case UNIPHY_IPQ5018:
+		regmap_read(uniphy->regmap, IPQ5018_UNIPHY_REFCLK, &val);
+		return !!(val & IPQ5018_UNIPHY_REFCLK_EN);
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int
+qca_uniphy_refclk_determine_rate(struct clk_hw *hw,
+				 struct clk_rate_request *req)
+{
+	struct qca_uniphy_clk *uclk =
+		container_of(hw, struct qca_uniphy_clk, hw);
+	struct qca_uniphy *uniphy = uclk->uniphy;
+
+	switch (uniphy->data->uniphy_type) {
+	case UNIPHY_IPQ5018:
+		switch (req->rate) {
+		case UNIPHY_REFCLK_25MHZ:
+		case UNIPHY_REFCLK_50MHZ:
+			return 0;
+		default:
+			return -EINVAL;
+		}
+	default:
+		return 0;
+	}
+}
+
+static unsigned long
+qca_uniphy_refclk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
+{
+	struct qca_uniphy_clk *uclk =
+		container_of(hw, struct qca_uniphy_clk, hw);
+	struct qca_uniphy *uniphy = uclk->uniphy;
+	u32 val;
+
+	switch (uniphy->data->uniphy_type) {
+	case UNIPHY_IPQ5018:
+		regmap_read(uniphy->regmap, IPQ5018_UNIPHY_REFCLK, &val);
+		if (val & IPQ5018_UNIPHY_REFCLK_DIV)
+			return UNIPHY_REFCLK_25MHZ;
+		else
+			return UNIPHY_REFCLK_50MHZ;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int
+qca_uniphy_refclk_set_rate(struct clk_hw *hw, unsigned long rate,
+			   unsigned long parent_rate)
+{
+	struct qca_uniphy_clk *refclk =
+		container_of(hw, struct qca_uniphy_clk, hw);
+	struct qca_uniphy *uniphy = refclk->uniphy;
+	u32 val = 0;
+
+	switch (uniphy->data->uniphy_type) {
+	case UNIPHY_IPQ5018:
+		if (parent_rate != UNIPHY_REFCLK_50MHZ)
+			return -EINVAL;
+
+		if (rate == UNIPHY_REFCLK_50MHZ)
+			val = FIELD_PREP(IPQ5018_UNIPHY_REFCLK_DIV, 0x0);
+		else if (rate == UNIPHY_REFCLK_25MHZ)
+			val = FIELD_PREP(IPQ5018_UNIPHY_REFCLK_DIV, 0x1);
+
+		regmap_update_bits(uniphy->regmap, IPQ5018_UNIPHY_REFCLK,
+				   IPQ5018_UNIPHY_REFCLK_DIV, val);
+		break;
+	default:
+		return 0;
+	}
+
+	return 0;
+}
+
+static const struct clk_ops qca_uniphy_refclk_ops = {
+	.enable = qca_uniphy_refclk_enable,
+	.determine_rate = qca_uniphy_refclk_determine_rate,
+	.recalc_rate = qca_uniphy_refclk_recalc_rate,
+	.set_rate = qca_uniphy_refclk_set_rate,
+};
+
+static int qca_uniphy_refclk_register(struct qca_uniphy *uniphy,
+				      const char *name) {
+	struct clk_parent_data pdata = { .fw_name = "ref" };
+	struct clk_init_data init = {};
+
+	init.name = name,
+	init.parent_data = &pdata;
+	init.num_parents = 1;
+	init.ops = &qca_uniphy_refclk_ops,
+	/* always derive rate from the UNIPHY register */
+	init.flags = CLK_GET_RATE_NOCACHE,
+
+	uniphy->ref_clk.hw.init = &init;
+	uniphy->ref_clk.uniphy = uniphy;
+
+	return devm_clk_hw_register(uniphy->dev, &uniphy->ref_clk.hw);
+}
+
+static int qca_uniphy_register_clks(struct qca_uniphy *uniphy) {
+	struct clk_hw_onecell_data *hw_data;
+	struct device *dev = uniphy->dev;
+	const char *name;
+	int num_clks;
+	int ret;
+
+	num_clks = (uniphy->data->ref_clk_enable) ? 3 : 2;
+	hw_data = devm_kzalloc(dev, struct_size(hw_data, hws, num_clks),
+			       GFP_KERNEL);
+	if (!hw_data)
+		return -ENOMEM;
+
+	if (of_property_read_string_index(dev->of_node, "clock-output-names",
+					  UNIPHY_CLK_RX, &name))
+		return -ENODEV;
+
+	ret = qca_uniphy_clk_register(uniphy, &uniphy->rx_clk, name);
+	if (ret)
+		return ret;
+	hw_data->hws[UNIPHY_CLK_RX] = &uniphy->rx_clk.hw;
+
+	if (of_property_read_string_index(dev->of_node, "clock-output-names",
+					  UNIPHY_CLK_TX, &name))
+		return -ENODEV;
+
+	ret = qca_uniphy_clk_register(uniphy, &uniphy->tx_clk, name);
+	if (ret)
+		return ret;
+	hw_data->hws[UNIPHY_CLK_TX] = &uniphy->tx_clk.hw;
+
+	if (uniphy->data->ref_clk_enable) {
+		if (of_property_read_string_index(dev->of_node,
+						  "clock-output-names",
+						  UNIPHY_CLK_REF, &name))
+			return -ENODEV;
+
+		ret = qca_uniphy_refclk_register(uniphy, name);
+		if (ret)
+			return ret;
+		hw_data->hws[UNIPHY_CLK_REF] = &uniphy->ref_clk.hw;
+	}
+
+	hw_data->num = num_clks;
+
+	return devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get, hw_data);
 }
 
 static unsigned int
@@ -244,9 +452,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 {
 	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
-	u32 misc2_phy_mode;
-	u32 mode_ctrl;
-	u32 val;
+	u32 misc2_phy_mode, mode_ctrl, val;
 	int ret;
 
 	switch (interface) {
@@ -254,10 +460,13 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_SGMII:
 		misc2_phy_mode = UNIPHY_MISC2_SGMII;
 		mode_ctrl = UNIPHY_SGMII_MODE;
-		if (interface == PHY_INTERFACE_MODE_SGMII &&
-		    neg_mode == PHYLINK_PCS_NEG_INBAND)
+		if (interface == PHY_INTERFACE_MODE_SGMII) {
 			mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
-						0x2);
+						UNIPHY_CH0_MODE_MAC);
+			if (neg_mode == PHYLINK_PCS_NEG_INBAND ||
+			    upcs->mode == MLO_AN_FIXED)
+				mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
+		}
 		break;
 	case PHY_INTERFACE_MODE_QSGMII:
 		mode_ctrl = UNIPHY_CH0_QSGMII_SGMII;
@@ -278,12 +487,24 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
-		if (neg_mode == PHYLINK_PCS_NEG_INBAND)
-			mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
-						0x2);
+		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
+					UNIPHY_CH0_MODE_MAC);
+		if (neg_mode == PHYLINK_PCS_NEG_INBAND ||
+		    upcs->mode == MLO_AN_FIXED)
+			mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		break;
 	default:
 		return -EINVAL;
+	}
+
+	/*
+	* The clock could have been enabled by the bootloader.
+	* Increase enable count (>0) CCF can properly account for clock state.
+	*/
+	if (uniphy->data->ref_clk_enable) {
+		if (!clk_hw_is_enabled(&uniphy->ref_clk.hw) &&
+		    qca_uniphy_refclk_is_enabled(&uniphy->ref_clk.hw))
+			clk_prepare_enable(uniphy->ref_clk.hw.clk);
 	}
 
 	/* First update misc2 PHY mode... */
@@ -299,11 +520,21 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	msleep(100);
 
 	/* Second assert XPCS... */
-	reset_control_assert(uniphy->rst_xpcs);
+	if (uniphy->rst_xpcs)
+		reset_control_assert(uniphy->rst_xpcs);
 
 	/* ...and disable PHY clock */
 	clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
 	clk_disable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
+
+	if (upcs->mode == MLO_AN_FIXED)
+		ret = regmap_set_bits(uniphy->regmap,
+				      UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+				      UNIPHY_CH_FORCE_MODE);
+	else
+		ret = regmap_clear_bits(uniphy->regmap,
+				      UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+				      UNIPHY_CH_FORCE_MODE);
 
 	/* Third update the mode ctrl... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
@@ -323,6 +554,14 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	reset_control_assert(uniphy->rst_soft);
 	msleep(100);
 	reset_control_deassert(uniphy->rst_soft);
+
+	/* IPQ5018 quirk: reset AHB for fixed link */
+	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018 &&
+	    upcs->mode == MLO_AN_FIXED && uniphy->rst_ahb) {
+		reset_control_assert(uniphy->rst_ahb);
+		msleep(100);
+		reset_control_deassert(uniphy->rst_ahb);
+	}
 
 	/* ...and wait for calibration */
 	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
@@ -345,6 +584,18 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	if (interface == PHY_INTERFACE_MODE_USXGMII ||
 	    interface == PHY_INTERFACE_MODE_10GBASER)
 		reset_control_deassert(uniphy->rst_xpcs);
+
+	if (!uniphy->data->ref_clk_enable)
+		return 0;
+
+	/* Trigger UNIPHY ref output clock to recalc rate */
+	clk_hw_recalc_rate(&uniphy->ref_clk.hw);
+	/* Trigger assigned-clock-rates in DT to be applied */
+	of_clk_set_defaults(uniphy->dev->of_node, true);
+	if (!qca_uniphy_refclk_is_enabled(&uniphy->ref_clk.hw))
+		qca_uniphy_refclk_enable(&uniphy->ref_clk.hw);
+
+	uniphy->interface = interface;
 
 	return 0;
 }
@@ -386,19 +637,26 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 				 const unsigned long *advertising,
 				 bool permit_pause_to_mac)
 {
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
+
 	switch (interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
 	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
-		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
+		if (uniphy->interface != interface)
+			return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
+		break;
 	case PHY_INTERFACE_MODE_USXGMII:
 	case PHY_INTERFACE_MODE_10GBASER:
 		return qca_uniphy_pcs_config_usxgmii(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	default:
 		return -EOPNOTSUPP;
 	}
+
+	return 0;
 }
 
 static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
@@ -547,7 +805,25 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 			phy_modes(interface));
 }
 
+static int qca_uniphy_pcs_validate(struct phylink_pcs *pcs, unsigned long *supported,
+			    const struct phylink_link_state *state)
+{
+	switch (state->interface) {
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_PSGMII:
+	case PHY_INTERFACE_MODE_1000BASEX:
+	case PHY_INTERFACE_MODE_2500BASEX:
+	case PHY_INTERFACE_MODE_USXGMII:
+	case PHY_INTERFACE_MODE_10GBASER:
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
 static const struct phylink_pcs_ops qca_uniphy_pcs_ops = {
+	.pcs_validate = qca_uniphy_pcs_validate,
 	.pcs_inband_caps = qca_uniphy_pcs_inband_caps,
 	.pcs_get_state = qca_uniphy_pcs_get_state,
 	.pcs_config = qca_uniphy_pcs_config,
@@ -555,8 +831,9 @@ static const struct phylink_pcs_ops qca_uniphy_pcs_ops = {
 };
 
 static const struct of_device_id qca_uniphy_of_match[] = {
-	{ .compatible = "qualcomm,ipq6018-uniphy" },
-	{ .compatible = "qualcomm,ipq8074-uniphy" },
+	{ .compatible = "qualcomm,ipq5018-uniphy", .data = &ipq5018_data },
+	{ .compatible = "qualcomm,ipq6018-uniphy", .data = &ipq6018_data },
+	{ .compatible = "qualcomm,ipq8074-uniphy", .data = &ipq8074_data },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, qca_uniphy_of_match);
@@ -638,7 +915,6 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct clk_bulk_data *clks;
 	struct qca_uniphy *uniphy;
-	const char *name;
 	int ret, i, num_clks;
 
 	uniphy = devm_kzalloc(dev, sizeof(*uniphy), GFP_KERNEL);
@@ -646,6 +922,10 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	uniphy->dev = dev;
+
+	uniphy->data = device_get_match_data(dev);
+	if (!uniphy->data)
+		return -EINVAL;
 
 	uniphy->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(uniphy->base))
@@ -655,6 +935,21 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	if (IS_ERR(uniphy->regmap))
 		return dev_err_probe(dev, PTR_ERR(uniphy->regmap),
 				     "failed to init regmap");
+
+	uniphy->rst_soft = devm_reset_control_get_exclusive(dev, "soft");
+	if (IS_ERR(uniphy->rst_soft))
+		return dev_err_probe(dev, PTR_ERR(uniphy->rst_soft),
+				     "failed to get soft reset\n");
+
+	uniphy->rst_xpcs = devm_reset_control_get_optional_exclusive(dev, "xpcs");
+	if (IS_ERR(uniphy->rst_xpcs))
+		return dev_err_probe(dev, PTR_ERR(uniphy->rst_xpcs),
+				     "failed to get xpcs reset\n");
+
+	uniphy->rst_ahb = devm_reset_control_get_optional_exclusive(dev, "ahb");
+	if (IS_ERR(uniphy->rst_ahb))
+		return dev_err_probe(dev, PTR_ERR(uniphy->rst_ahb),
+				     "failed to get ahb reset\n");
 
 	num_clks = devm_clk_bulk_get_all(dev, &clks);
 	if (num_clks < 0)
@@ -672,33 +967,9 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	uniphy->rst_soft = devm_reset_control_get_exclusive(dev, "soft");
-	if (IS_ERR(uniphy->rst_soft))
-		return dev_err_probe(dev, PTR_ERR(uniphy->rst_soft),
-				     "failed to get soft reset\n");
-
-	uniphy->rst_xpcs = devm_reset_control_get_exclusive(dev, "xpcs");
-	if (IS_ERR(uniphy->rst_xpcs))
-		return dev_err_probe(dev, PTR_ERR(uniphy->rst_xpcs),
-				     "failed to get xpcs reset\n");
-
-	if (of_property_read_string_index(dev->of_node, "clock-output-names",
-					  0, &name))
-		return -ENODEV;
-
-	ret = qca_uniphy_clk_register(uniphy, &uniphy->rx_clk, name);
+	ret = qca_uniphy_register_clks(uniphy);
 	if (ret)
-		return dev_err_probe(dev, ret,
-				     "failed to register RX clock\n");
-
-	if (of_property_read_string_index(dev->of_node, "clock-output-names",
-					  1, &name))
-			return -ENODEV;
-
-	ret = qca_uniphy_clk_register(uniphy, &uniphy->tx_clk, name);
-	if (ret)
-		return dev_err_probe(dev, ret,
-				     "failed to register TX clock\n");
+		return dev_err_probe(dev, ret, "failed to register clocks\n");
 
 	for (i = 0; i < QCA_UNIPHY_CHANNELS; i++) {
 		uniphy->port_pcs[i].pcs.ops = &qca_uniphy_pcs_ops;
