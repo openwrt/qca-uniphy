@@ -23,12 +23,6 @@
 
 #include "qca_uniphy.h"
 
-static struct qca_uniphy_pcs *
-pcs_to_uniphy_pcs(struct phylink_pcs *pcs)
-{
-	return container_of(pcs, struct qca_uniphy_pcs, pcs);
-}
-
 static unsigned long
 qca_uniphy_clk_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 {
@@ -215,7 +209,7 @@ static void qca_uniphy_pcs_get_state_10base_r(struct qca_uniphy *uniphy,
 static void qca_uniphy_pcs_get_state(struct phylink_pcs *pcs,
 				     struct phylink_link_state *state)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
 
 	switch (state->interface) {
@@ -247,7 +241,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 				      const unsigned long *advertising,
 				      bool permit_pause_to_mac)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
 	u32 misc2_phy_mode;
 	u32 mode_ctrl;
@@ -360,7 +354,7 @@ static int qca_uniphy_pcs_config_usxgmii(struct phylink_pcs *pcs,
 					 const unsigned long *advertising,
 					 bool permit_pause_to_mac)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
 	int ret;
 
@@ -410,7 +404,7 @@ static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
 				phy_interface_t interface,
 				int speed)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
 	unsigned long uniphy_rate;
 	int ret;
@@ -474,7 +468,7 @@ static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
 
 static int uniphy_link_up_usxgmii(struct phylink_pcs *pcs, int speed)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
 	unsigned int val, uniphy_rate;
 	int ret;
@@ -527,7 +521,7 @@ static void qca_uniphy_pcs_link_up(struct phylink_pcs *pcs,
 				   phy_interface_t interface,
 				   int speed, int duplex)
 {
-	struct qca_uniphy_pcs *upcs = pcs_to_uniphy_pcs(pcs);
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
 	struct qca_uniphy *uniphy = upcs->uniphy;
 	int ret = 0;
 
@@ -610,7 +604,7 @@ void qca_uniphy_pcs_put(struct phylink_pcs *pcs)
 	if (!pcs)
 		return;
 
-	upcs = pcs_to_uniphy_pcs(pcs);
+	upcs = to_qca_uniphy_pcs(pcs);
 	uniphy = upcs->uniphy;
 
 	put_device(uniphy->dev);

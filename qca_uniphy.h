@@ -101,6 +101,8 @@ struct qca_uniphy_pcs {
 	int channel;
 };
 
+#define to_qca_uniphy_pcs(n) container_of(pcs, struct qca_uniphy_pcs, pcs);
+
 struct qca_uniphy {
 	struct device *dev;
 	void __iomem *base;
