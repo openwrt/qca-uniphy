@@ -18,6 +18,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
+#include <linux/pcs/pcs-provider.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 
@@ -560,57 +561,6 @@ static const struct of_device_id qca_uniphy_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, qca_uniphy_of_match);
 
-struct phylink_pcs *qca_uniphy_pcs_get(struct device *dev,
-				       struct device_node *np,
-				       int channel)
-{
-	struct platform_device *pdev;
-	struct qca_uniphy *uniphy;
-
-	if (!np)
-		return NULL;
-
-	if (!of_device_is_available(np))
-		return ERR_PTR(-ENODEV);
-
-	if (!of_match_node(qca_uniphy_of_match, np))
-		return ERR_PTR(-EINVAL);
-
-	pdev = of_find_device_by_node(np);
-	if (!pdev || !platform_get_drvdata(pdev)) {
-		if (pdev)
-			put_device(&pdev->dev);
-		return ERR_PTR(-EPROBE_DEFER);
-	}
-
-	uniphy = platform_get_drvdata(pdev);
-
-	if (channel < 0 || channel >= QCA_UNIPHY_CHANNELS) {
-		put_device(&pdev->dev);
-		return ERR_PTR(-EINVAL);
-	}
-
-	device_link_add(dev, uniphy->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
-
-	return &uniphy->port_pcs[channel].pcs;
-}
-EXPORT_SYMBOL_GPL(qca_uniphy_pcs_get);
-
-void qca_uniphy_pcs_put(struct phylink_pcs *pcs)
-{
-	struct qca_uniphy *uniphy;
-	struct qca_uniphy_pcs *upcs;
-
-	if (!pcs)
-		return;
-
-	upcs = to_qca_uniphy_pcs(pcs);
-	uniphy = upcs->uniphy;
-
-	put_device(uniphy->dev);
-}
-EXPORT_SYMBOL_GPL(qca_uniphy_pcs_put);
-
 static void qca_uniphy_clk_disable_unprepare(void *data)
 {
 	struct qca_uniphy *uniphy = data;
@@ -650,6 +600,29 @@ static int uniphy_pcs_regmap_write(void *context, unsigned int reg,
 	}
 
 	return 0;
+}
+
+static struct phylink_pcs *qca_uniphy_get(struct fwnode_reference_args *pcsspec,
+					  void *data)
+{
+	struct qca_uniphy *uniphy = data;
+	struct device *dev = uniphy->dev;
+	int channel = 0;
+
+	if (pcsspec->nargs > 1) {
+		dev_err(dev, "invalid number of cells in 'pcs-handle' property\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (pcsspec->nargs)
+		channel = pcsspec->args[0];
+
+	if (channel >= QCA_UNIPHY_CHANNELS) {
+		dev_err(dev, "invalid channel in 'pcs-handle' property\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	return &uniphy->port_pcs[channel].pcs;
 }
 
 static const struct regmap_config uniphy_regmap_cfg = {
@@ -737,7 +710,8 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, uniphy);
 
-	return 0;
+	return fwnode_pcs_add_provider(dev_fwnode(dev), qca_uniphy_get,
+				       uniphy);
 }
 
 static struct platform_driver qca_uniphy_driver = {
