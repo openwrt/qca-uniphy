@@ -462,8 +462,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 		if (interface == PHY_INTERFACE_MODE_SGMII) {
 			mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
 						UNIPHY_CH0_MODE_MAC);
-			if (neg_mode == PHYLINK_PCS_NEG_INBAND ||
-			    upcs->mode == MLO_AN_FIXED)
+			if (neg_mode == PHYLINK_PCS_NEG_INBAND_ENABLED)
 				mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		}
 		break;
@@ -488,8 +487,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
 		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
 					UNIPHY_CH0_MODE_MAC);
-		if (neg_mode == PHYLINK_PCS_NEG_INBAND ||
-		    upcs->mode == MLO_AN_FIXED)
+		if (neg_mode == PHYLINK_PCS_NEG_INBAND_ENABLED)
 			mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		break;
 	default:
@@ -526,7 +524,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
 	clk_disable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
 
-	if (upcs->mode == MLO_AN_FIXED)
+	if (neg_mode == PHYLINK_PCS_NEG_OUTBAND)
 		ret = regmap_set_bits(uniphy->regmap,
 				      UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
 				      UNIPHY_CH_FORCE_MODE);
@@ -556,7 +554,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 
 	/* IPQ5018 quirk: reset AHB for fixed link */
 	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018 &&
-	    upcs->mode == MLO_AN_FIXED && uniphy->rst_ahb) {
+	    neg_mode == PHYLINK_PCS_NEG_OUTBAND && uniphy->rst_ahb) {
 		reset_control_assert(uniphy->rst_ahb);
 		msleep(100);
 		reset_control_deassert(uniphy->rst_ahb);

@@ -113,7 +113,6 @@ struct qca_uniphy_pcs {
 	struct phylink_pcs pcs;
 	struct qca_uniphy *uniphy;
 	int channel;
-	unsigned int mode;
 };
 
 struct qca_uniphy_match_data {
