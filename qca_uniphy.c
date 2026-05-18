@@ -6,8 +6,7 @@
  *
  * Standalone PCS driver for the UNIPHY SerDes blocks in IPQ6018 SoCs.
  * Each UNIPHY instance provides up to 5 SGMII channels (PSGMII mode)
- * or a single channel for SGMII/USXGMII. The driver is consumed by the
- * IPQ6018 PPE DSA switch driver via qca_uniphy_pcs_get().
+ * or a single channel for SGMII/USXGMII.
  */
 
 #include <linux/bitfield.h>

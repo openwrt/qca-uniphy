@@ -143,9 +143,4 @@ struct qca_uniphy {
 #define port_rx_clk_idx(upcs)	((upcs)->channel * 2) + 2
 #define port_tx_clk_idx(upcs)	(((upcs)->channel * 2) + 1) + 2
 
-struct phylink_pcs *qca_uniphy_pcs_get(struct device *dev,
-				       struct device_node *np,
-				       int channel);
-void qca_uniphy_pcs_put(struct phylink_pcs *pcs);
-
 #endif
