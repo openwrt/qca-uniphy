@@ -136,7 +136,6 @@ struct qca_uniphy {
 	struct qca_uniphy_clk tx_clk;
 	struct qca_uniphy_clk ref_clk;
 	const struct qca_uniphy_match_data *data;
-	phy_interface_t interface;
 };
 
 #define port_rx_clk_idx(upcs)	((upcs)->channel * 2) + 2

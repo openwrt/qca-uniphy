@@ -588,8 +588,6 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	if (!qca_uniphy_refclk_is_enabled(&uniphy->ref_clk.hw))
 		qca_uniphy_refclk_enable(&uniphy->ref_clk.hw);
 
-	uniphy->interface = interface;
-
 	return 0;
 }
 
@@ -639,17 +637,13 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_PSGMII:
 	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
-		if (uniphy->interface != interface)
-			return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
-		break;
+		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	case PHY_INTERFACE_MODE_USXGMII:
 	case PHY_INTERFACE_MODE_10GBASER:
 		return qca_uniphy_pcs_config_usxgmii(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	default:
 		return -EOPNOTSUPP;
 	}
-
-	return 0;
 }
 
 static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
