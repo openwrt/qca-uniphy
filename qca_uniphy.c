@@ -517,8 +517,7 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	msleep(100);
 
 	/* Second assert XPCS... */
-	if (uniphy->rst_xpcs)
-		reset_control_assert(uniphy->rst_xpcs);
+	reset_control_assert(uniphy->rst_xpcs);
 
 	/* ...and disable PHY clock */
 	clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
@@ -552,13 +551,10 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	msleep(100);
 	reset_control_deassert(uniphy->rst_soft);
 
-	/* IPQ5018 quirk: reset AHB for fixed link */
-	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018 &&
-	    neg_mode == PHYLINK_PCS_NEG_OUTBAND && uniphy->rst_ahb) {
-		reset_control_assert(uniphy->rst_ahb);
-		msleep(100);
-		reset_control_deassert(uniphy->rst_ahb);
-	}
+	/* Specific to IPQ5018 */
+	reset_control_assert(uniphy->rst_ahb);
+	msleep(100);
+	reset_control_deassert(uniphy->rst_ahb);
 
 	/* ...and wait for calibration */
 	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
