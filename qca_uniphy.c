@@ -290,16 +290,16 @@ static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy *uniphy,
 	u32 val;
 
 	regmap_read(uniphy->regmap,
-		    UNIPHY_CH_INPUT_OUTPUT_6(channel),
+		    UNIPHY_CH_STS(channel),
 		    &val);
 
-	state->link = !!(val & UNIPHY_CH_LINK);
+	state->link = !!(val & UNIPHY_CH_STS_LINK);
 	if (!state->link)
 		return;
 
-	state->duplex = (val & UNIPHY_CH_DUPLEX) ? DUPLEX_FULL : DUPLEX_HALF;
+	state->duplex = (val & UNIPHY_CH_STS_DUPLEX) ? DUPLEX_FULL : DUPLEX_HALF;
 
-	switch (FIELD_GET(UNIPHY_CH_SPEED_MODE, val)) {
+	switch (FIELD_GET(UNIPHY_CH_STS_SPEED_MODE, val)) {
 	case 0:
 		state->speed = SPEED_10;
 		break;
@@ -315,9 +315,9 @@ static void qca_uniphy_pcs_get_state_sgmii(struct qca_uniphy *uniphy,
 	}
 
 	state->pause = 0;
-	if (val & UNIPHY_CH_RX_PAUSE)
+	if (val & UNIPHY_CH_STS_RX_PAUSE)
 		state->pause |= MLO_PAUSE_RX;
-	if (val & UNIPHY_CH_TX_PAUSE)
+	if (val & UNIPHY_CH_STS_TX_PAUSE)
 		state->pause |= MLO_PAUSE_TX;
 
 	state->an_complete = state->link;
@@ -330,10 +330,10 @@ static void qca_uniphy_pcs_get_state_hsgmii(struct qca_uniphy *uniphy,
 	u32 val;
 
 	regmap_read(uniphy->regmap,
-		    UNIPHY_CH_INPUT_OUTPUT_6(channel),
+		    UNIPHY_CH_STS(channel),
 		    &val);
 
-	state->link = !!(val & UNIPHY_CH_LINK);
+	state->link = !!(val & UNIPHY_CH_STS_LINK);
 	if (!state->link)
 		return;
 
@@ -341,9 +341,9 @@ static void qca_uniphy_pcs_get_state_hsgmii(struct qca_uniphy *uniphy,
 	state->duplex = DUPLEX_FULL;
 
 	state->pause = 0;
-	if (val & UNIPHY_CH_RX_PAUSE)
+	if (val & UNIPHY_CH_STS_RX_PAUSE)
 		state->pause |= MLO_PAUSE_RX;
-	if (val & UNIPHY_CH_TX_PAUSE)
+	if (val & UNIPHY_CH_STS_TX_PAUSE)
 		state->pause |= MLO_PAUSE_TX;
 
 	state->an_complete = state->link;
@@ -528,11 +528,11 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 
 	if (upcs->mode == MLO_AN_FIXED)
 		ret = regmap_set_bits(uniphy->regmap,
-				      UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+				      UNIPHY_CH_CTRL(upcs->channel),
 				      UNIPHY_CH_FORCE_MODE);
 	else
 		ret = regmap_clear_bits(uniphy->regmap,
-				      UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+				      UNIPHY_CH_CTRL(upcs->channel),
 				      UNIPHY_CH_FORCE_MODE);
 
 	/* Third update the mode ctrl... */
@@ -713,14 +713,14 @@ static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
 	clk_set_rate(uniphy->clks[port_rx_clk_idx(upcs)].clk, uniphy_rate);
 	clk_set_rate(uniphy->clks[port_tx_clk_idx(upcs)].clk, uniphy_rate);
 
-	ret = regmap_clear_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+	ret = regmap_clear_bits(uniphy->regmap, UNIPHY_CH_CTRL(upcs->channel),
 				UNIPHY_CH_ADP_SW_RSTN);
 	if (ret)
 		return ret;
 
 	usleep_range(1000, 2000);
 
-	return regmap_set_bits(uniphy->regmap, UNIPHY_CH_INPUT_OUTPUT_4(upcs->channel),
+	return regmap_set_bits(uniphy->regmap, UNIPHY_CH_CTRL(upcs->channel),
 			       UNIPHY_CH_ADP_SW_RSTN);
 }
 
