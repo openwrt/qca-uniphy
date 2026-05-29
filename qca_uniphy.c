@@ -821,12 +821,52 @@ static int qca_uniphy_pcs_validate(struct phylink_pcs *pcs, unsigned long *suppo
 	}
 }
 
+static void qca_uniphy_pcs_disable(struct phylink_pcs *pcs)
+{
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
+
+	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018) {
+		clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
+		clk_disable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
+	}
+}
+
+static int qca_uniphy_pcs_enable(struct phylink_pcs *pcs)
+{
+	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
+	struct qca_uniphy *uniphy = upcs->uniphy;
+	int ret;
+
+	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018) {
+		ret = clk_enable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
+		if (ret) {
+			dev_err(uniphy->dev, "Failed to enable RX clock for channel %d\n",
+				upcs->channel);
+			return ret;
+		}
+		ret = clk_enable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
+		if (ret) {
+			dev_err(uniphy->dev, "Failed to enable TX clock for channel %d\n",
+				upcs->channel);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static void qca_uniphy_pcs_an_restart(struct phylink_pcs *pcs) { }
+
 static const struct phylink_pcs_ops qca_uniphy_pcs_ops = {
 	.pcs_validate = qca_uniphy_pcs_validate,
 	.pcs_inband_caps = qca_uniphy_pcs_inband_caps,
 	.pcs_get_state = qca_uniphy_pcs_get_state,
 	.pcs_config = qca_uniphy_pcs_config,
 	.pcs_link_up = qca_uniphy_pcs_link_up,
+	.pcs_disable = qca_uniphy_pcs_disable,
+	.pcs_enable = qca_uniphy_pcs_enable,
+	.pcs_an_restart = qca_uniphy_pcs_an_restart,
 };
 
 static const struct of_device_id qca_uniphy_of_match[] = {
