@@ -96,14 +96,12 @@ properties:
     items:
       - description: soft reset
       - description: xpcs reset
-      - description: ahb reset
 
   reset-names:
     minItems: 1
     items:
       - const: soft
       - const: xpcs
-      - const: ahb
 
 required:
   - compatible
@@ -203,8 +201,6 @@ examples:
         clock-output-names = "uniphy0_gcc_rx_clk",
                              "uniphy0_gcc_tx_clk",
                              "uniphy0_ref_clk";
-        resets = <&gcc GCC_UNIPHY_SOFT_RESET>,
-                 <&gcc GCC_UNIPHY_AHB_ARES>;
-        reset-names = "soft",
-                      "ahb";
+        resets = <&gcc GCC_UNIPHY_SOFT_RESET>;
+        reset-names = "soft";
     };
