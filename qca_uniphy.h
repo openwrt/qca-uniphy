@@ -34,21 +34,26 @@
 #define   UNIPHY_CH0_MODE_CTRL_25M	GENMASK(6, 4)
 #define   UNIPHY_CH0_MODE_1000BASEX	0
 #define   UNIPHY_CH0_MODE_MAC		2
-#define   UNIPHY_AUTONEG_MODE_ATH	BIT(0) /* 0: atheros, 1: standard */
+#define   UNIPHY_AUTONEG_MODE_ATH	BIT(0)
 
 #define UNIPHY_PLL_POWER_ON_AND_RESET	0x780
 #define   UNIPHY_PLL_RESET_ANALOG	BIT(6)
 
 #define UNIPHY_CH_BASE(ch)		(0x480 + (ch) * 0x18)
-#define UNIPHY_CH_INPUT_OUTPUT_4(ch)	(UNIPHY_CH_BASE(ch) + 0x0)
-#define UNIPHY_CH_INPUT_OUTPUT_6(ch)	(UNIPHY_CH_BASE(ch) + 0x8)
-#define   UNIPHY_CH_ADP_SW_RSTN		BIT(11)
-#define   UNIPHY_CH_RX_PAUSE		BIT(0)
-#define   UNIPHY_CH_TX_PAUSE		BIT(1)
+
+#define UNIPHY_CH_CTRL(ch)		(UNIPHY_CH_BASE(ch) + 0x0)
+#define   UNIPHY_CH_SPEED_MODE		GENMASK(2, 1)
 #define   UNIPHY_CH_FORCE_MODE		BIT(3)
-#define   UNIPHY_CH_SPEED_MODE		GENMASK(5, 4)
-#define   UNIPHY_CH_DUPLEX		BIT(6)
-#define   UNIPHY_CH_LINK		BIT(7)
+#define   UNIPHY_CH_AN_ENABLE		BIT(6)
+#define   UNIPHY_CH_AN_RESTART		BIT(7)
+#define   UNIPHY_CH_ADP_SW_RSTN		BIT(11)
+
+#define UNIPHY_CH_STS(ch)		(UNIPHY_CH_BASE(ch) + 0x8)
+#define   UNIPHY_CH_STS_RX_PAUSE	BIT(0)
+#define   UNIPHY_CH_STS_TX_PAUSE	BIT(1)
+#define   UNIPHY_CH_STS_SPEED_MODE	GENMASK(5, 4)
+#define   UNIPHY_CH_STS_DUPLEX		BIT(6)
+#define   UNIPHY_CH_STS_LINK		BIT(7)
 
 #define XPCS_INDIRECT_ADDR		0x8000
 #define XPCS_INDIRECT_AHB_ADDR		0x83fc
@@ -113,7 +118,7 @@ struct qca_uniphy_pcs {
 	struct phylink_pcs pcs;
 	struct qca_uniphy *uniphy;
 	int channel;
-	unsigned int mode;
+	bool force_mode;
 };
 
 struct qca_uniphy_match_data {
