@@ -19,6 +19,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/pcs/pcs-provider.h>
+#include <linux/phylink.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 
@@ -454,18 +455,19 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	u32 misc2_phy_mode, mode_ctrl, val;
 	int ret;
 
+	dev_dbg(uniphy->dev, "Configuring PCS: chan=%d, interface=%s, neg_mode=0x%x\n",
+		upcs->channel, phy_modes(interface), neg_mode);
+
 	switch (interface) {
 	case PHY_INTERFACE_MODE_1000BASEX:
+		misc2_phy_mode = UNIPHY_MISC2_SGMII;
+		mode_ctrl = UNIPHY_SGMII_MODE;
+		break;
 	case PHY_INTERFACE_MODE_SGMII:
 		misc2_phy_mode = UNIPHY_MISC2_SGMII;
 		mode_ctrl = UNIPHY_SGMII_MODE;
-		if (interface == PHY_INTERFACE_MODE_SGMII) {
-			mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
-						UNIPHY_CH0_MODE_MAC);
-			if (neg_mode == PHYLINK_PCS_NEG_INBAND ||
-			    upcs->mode == MLO_AN_FIXED)
-				mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
-		}
+		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M, UNIPHY_CH0_MODE_MAC);
+		mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		break;
 	case PHY_INTERFACE_MODE_QSGMII:
 		mode_ctrl = UNIPHY_CH0_QSGMII_SGMII;
@@ -486,11 +488,8 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	case PHY_INTERFACE_MODE_2500BASEX:
 		misc2_phy_mode = UNIPHY_MISC2_SGMIIPLUS;
 		mode_ctrl = UNIPHY_SGPLUS_MODE;
-		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M,
-					UNIPHY_CH0_MODE_MAC);
-		if (neg_mode == PHYLINK_PCS_NEG_INBAND ||
-		    upcs->mode == MLO_AN_FIXED)
-			mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
+		mode_ctrl |= FIELD_PREP(UNIPHY_CH0_MODE_CTRL_25M, UNIPHY_CH0_MODE_MAC);
+		mode_ctrl |= UNIPHY_AUTONEG_MODE_ATH;
 		break;
 	default:
 		return -EINVAL;
@@ -526,14 +525,11 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
 	clk_disable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
 
-	if (upcs->mode == MLO_AN_FIXED)
-		ret = regmap_set_bits(uniphy->regmap,
-				      UNIPHY_CH_CTRL(upcs->channel),
-				      UNIPHY_CH_FORCE_MODE);
-	else
-		ret = regmap_clear_bits(uniphy->regmap,
-				      UNIPHY_CH_CTRL(upcs->channel),
-				      UNIPHY_CH_FORCE_MODE);
+	//by default, autoneg is enabled & force mode is disabled
+	if (neg_mode != PHYLINK_PCS_NEG_INBAND_ENABLED && upcs->force_mode) {
+		regmap_set_bits(uniphy->regmap, UNIPHY_CH_CTRL(upcs->channel),
+				UNIPHY_CH_FORCE_MODE);
+	}
 
 	/* Third update the mode ctrl... */
 	regmap_update_bits(uniphy->regmap, UNIPHY_MODE_CTRL,
@@ -553,14 +549,6 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	reset_control_assert(uniphy->rst_soft);
 	msleep(100);
 	reset_control_deassert(uniphy->rst_soft);
-
-	/* IPQ5018 quirk: reset AHB for fixed link */
-	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018 &&
-	    upcs->mode == MLO_AN_FIXED && uniphy->rst_ahb) {
-		reset_control_assert(uniphy->rst_ahb);
-		msleep(100);
-		reset_control_deassert(uniphy->rst_ahb);
-	}
 
 	/* ...and wait for calibration */
 	ret = regmap_read_poll_timeout(uniphy->regmap, UNIPHY_OFFSET_CALIB_4,
@@ -593,8 +581,6 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	of_clk_set_defaults(uniphy->dev->of_node, true);
 	if (!qca_uniphy_refclk_is_enabled(&uniphy->ref_clk.hw))
 		qca_uniphy_refclk_enable(&uniphy->ref_clk.hw);
-
-	uniphy->interface = interface;
 
 	return 0;
 }
@@ -636,26 +622,19 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 				 const unsigned long *advertising,
 				 bool permit_pause_to_mac)
 {
-	struct qca_uniphy_pcs *upcs = to_qca_uniphy_pcs(pcs);
-	struct qca_uniphy *uniphy = upcs->uniphy;
-
 	switch (interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
 	case PHY_INTERFACE_MODE_PSGMII:
 	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
-		if (uniphy->interface != interface)
-			return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
-		break;
+		return qca_uniphy_pcs_config_mode(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	case PHY_INTERFACE_MODE_USXGMII:
 	case PHY_INTERFACE_MODE_10GBASER:
 		return qca_uniphy_pcs_config_usxgmii(pcs, neg_mode, interface, advertising, permit_pause_to_mac);
 	default:
 		return -EOPNOTSUPP;
 	}
-
-	return 0;
 }
 
 static int uniphy_link_up_sgmii(struct phylink_pcs *pcs,
@@ -877,13 +856,6 @@ static const struct of_device_id qca_uniphy_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, qca_uniphy_of_match);
 
-static void qca_uniphy_clk_disable_unprepare(void *data)
-{
-	struct qca_uniphy *uniphy = data;
-
-	clk_bulk_disable_unprepare(uniphy->num_clks, uniphy->clks);
-}
-
 static int uniphy_pcs_regmap_read(void *context, unsigned int reg,
 				  unsigned int *val)
 {
@@ -926,7 +898,7 @@ static struct phylink_pcs *qca_uniphy_get(struct fwnode_reference_args *pcsspec,
 	int channel = 0;
 
 	if (pcsspec->nargs > 1) {
-		dev_err(dev, "invalid number of cells in 'pcs-handle' property\n");
+		dev_err(dev, "Invalid number of cells in 'pcs-handle' property\n");
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -934,7 +906,7 @@ static struct phylink_pcs *qca_uniphy_get(struct fwnode_reference_args *pcsspec,
 		channel = pcsspec->args[0];
 
 	if (channel >= QCA_UNIPHY_CHANNELS) {
-		dev_err(dev, "invalid channel in 'pcs-handle' property\n");
+		dev_err(dev, "Invalid channel in 'pcs-handle' property\n");
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -968,47 +940,34 @@ static int qca_uniphy_probe(struct platform_device *pdev)
 
 	uniphy->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(uniphy->base))
-		return dev_err_probe(dev, PTR_ERR(uniphy->base), "failed to ioremap resource");
+		return dev_err_probe(dev, PTR_ERR(uniphy->base),
+				     "Failed to ioremap resource");
 
 	uniphy->regmap = devm_regmap_init(dev, NULL, uniphy, &uniphy_regmap_cfg);
 	if (IS_ERR(uniphy->regmap))
 		return dev_err_probe(dev, PTR_ERR(uniphy->regmap),
-				     "failed to init regmap");
+				     "Failed to init regmap");
 
 	uniphy->rst_soft = devm_reset_control_get_exclusive(dev, "soft");
 	if (IS_ERR(uniphy->rst_soft))
 		return dev_err_probe(dev, PTR_ERR(uniphy->rst_soft),
-				     "failed to get soft reset\n");
+				     "Failed to get soft reset\n");
 
 	uniphy->rst_xpcs = devm_reset_control_get_optional_exclusive(dev, "xpcs");
 	if (IS_ERR(uniphy->rst_xpcs))
 		return dev_err_probe(dev, PTR_ERR(uniphy->rst_xpcs),
-				     "failed to get xpcs reset\n");
+				     "Failed to get xpcs reset\n");
 
-	uniphy->rst_ahb = devm_reset_control_get_optional_exclusive(dev, "ahb");
-	if (IS_ERR(uniphy->rst_ahb))
-		return dev_err_probe(dev, PTR_ERR(uniphy->rst_ahb),
-				     "failed to get ahb reset\n");
-
-	num_clks = devm_clk_bulk_get_all(dev, &clks);
+	num_clks = devm_clk_bulk_get_all_enabled(dev, &clks);
 	if (num_clks < 0)
-		return dev_err_probe(dev, num_clks, "failed to get clocks\n");
-
-	ret = clk_bulk_prepare_enable(num_clks, clks);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to enable clocks\n");
+		return dev_err_probe(dev, num_clks, "Failed to get clocks\n");
 
 	uniphy->clks = clks;
 	uniphy->num_clks = num_clks;
 
-	ret = devm_add_action_or_reset(dev, qca_uniphy_clk_disable_unprepare,
-				       uniphy);
-	if (ret)
-		return ret;
-
 	ret = qca_uniphy_register_clks(uniphy);
 	if (ret)
-		return dev_err_probe(dev, ret, "failed to register clocks\n");
+		return dev_err_probe(dev, ret, "Failed to register output clocks\n");
 
 	for (i = 0; i < QCA_UNIPHY_CHANNELS; i++) {
 		uniphy->port_pcs[i].pcs.ops = &qca_uniphy_pcs_ops;
