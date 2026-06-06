@@ -525,11 +525,14 @@ static int qca_uniphy_pcs_config_mode(struct phylink_pcs *pcs,
 	clk_disable(uniphy->clks[port_rx_clk_idx(upcs)].clk);
 	clk_disable(uniphy->clks[port_tx_clk_idx(upcs)].clk);
 
-	//set force mode for fixed link
-	if (neg_mode == PHYLINK_PCS_NEG_OUTBAND && !phylink_expects_phy(pcs->phylink)) {
-		regmap_set_bits(uniphy->regmap,
-				UNIPHY_CH_CTRL(upcs->channel),
-				UNIPHY_CH_FORCE_MODE);
+	/* TODO: Fix for IPQ6018 and IPQ8074 */
+	if (uniphy->data->uniphy_type == UNIPHY_IPQ5018) {
+		//set force mode for fixed link
+		if (neg_mode == PHYLINK_PCS_NEG_OUTBAND && !phylink_expects_phy(pcs->phylink)) {
+			regmap_set_bits(uniphy->regmap,
+					UNIPHY_CH_CTRL(upcs->channel),
+					UNIPHY_CH_FORCE_MODE);
+		}
 	}
 
 	/* Third update the mode ctrl... */
@@ -623,6 +626,9 @@ static int qca_uniphy_pcs_config(struct phylink_pcs *pcs,
 				 const unsigned long *advertising,
 				 bool permit_pause_to_mac)
 {
+	if (!pcs->phylink)
+		return 0;
+
 	switch (interface) {
 	case PHY_INTERFACE_MODE_SGMII:
 	case PHY_INTERFACE_MODE_QSGMII:
